@@ -81,7 +81,7 @@ function makeHeading(Tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
       <Tag>
         {children}
         {section && (
-          <span className="section-progress" aria-label={`${section.done} of ${section.total} done`}>
+          <span className={section.done === section.total ? "section-progress complete" : "section-progress"} aria-label={`${section.done} of ${section.total} done`}>
             {section.done}/{section.total}
           </span>
         )}

@@ -77,3 +77,12 @@ describe("selection scope", () => {
     expect(locateSelection(src, "not there")).toBeNull();
   });
 });
+
+import { pushHistory } from "./history";
+describe("history", () => {
+  it("keeps most recent first without duplicates", () => {
+    expect(pushHistory(["a", "b"], "b")).toEqual(["b", "a"]);
+    expect(pushHistory(["a"], "  ")).toEqual(["a"]);
+    expect(pushHistory(Array.from({ length: 8 }, (_, i) => String(i)), "new")).toHaveLength(8);
+  });
+});

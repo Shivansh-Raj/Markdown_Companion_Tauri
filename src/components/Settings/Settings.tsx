@@ -3,6 +3,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "../../services/api";
 import { acceleratorFromEvent, prettyAccelerator } from "../../services/accelerator";
 import { THEME_OPTIONS } from "../../services/themeContext";
+import { testKey } from "../../services/ai";
+import { animationsEnabled, setAnimationsEnabled } from "../../services/animations";
 import type { Settings as SettingsModel, ThemeName } from "../../types";
 
 const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
@@ -12,8 +14,15 @@ export function Settings({ onBack, onChanged }: { onBack: () => void; onChanged:
   const [folders, setFolders] = useState<string[]>([]);
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasKey, setHasKey] = useState(false);
+  const [keyDraft, setKeyDraft] = useState("");
+  const [keyMsg, setKeyMsg] = useState<string | null>(null);
+  const [saveDir, setSaveDir] = useState("");
+  const [anim, setAnim] = useState(animationsEnabled());
 
   useEffect(() => {
+    api.getGroqKey().then((k) => setHasKey(!!k)).catch(() => {});
+    api.getSaveDir().then(setSaveDir).catch(() => {});
     api.getSettings().then(setSettings).catch((e) => setError(String(e)));
     api.listFolders().then(setFolders).catch((e) => setError(String(e)));
   }, []);
@@ -43,6 +52,44 @@ export function Settings({ onBack, onChanged }: { onBack: () => void; onChanged:
       setFolders(await api.listFolders());
       onChanged();
     }).catch(fail);
+  };
+
+  const saveKey = async (value: string) => {
+    try {
+      await api.setGroqKey(value);
+      setHasKey(!!value.trim());
+      setKeyDraft("");
+      setKeyMsg(value.trim() ? "Key saved." : "Key removed.");
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  const runKeyTest = async () => {
+    setKeyMsg("Testing…");
+    try {
+      const key = keyDraft.trim() || (await api.getGroqKey());
+      if (!key) return setKeyMsg("Enter a key first.");
+      const model = await testKey(key);
+      setKeyMsg(`Key works. Will use ${model}.`);
+    } catch (e) {
+      setKeyMsg(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const chooseSaveDir = async (reset: boolean) => {
+    try {
+      if (reset) await api.setSaveDir(null);
+      else {
+        const picked = await open({ directory: true, multiple: false });
+        if (typeof picked !== "string") return;
+        await api.setSaveDir(picked);
+      }
+      setSaveDir(await api.getSaveDir());
+      setError(null);
+    } catch (e) {
+      fail(e);
+    }
   };
 
   const onRecordKey = (e: React.KeyboardEvent) => {
@@ -113,6 +160,43 @@ export function Settings({ onBack, onChanged }: { onBack: () => void; onChanged:
           onChange={(e) => save(settings.theme, e.target.checked)}
         />
         Reopen trackers that were open when the app quit
+      </label>
+
+      <h2>AI</h2>
+      <div className="row-flex">
+        <input
+          className="search"
+          style={{ margin: 0, flex: 1, minWidth: 140 }}
+          type="password"
+          autoComplete="off"
+          placeholder={hasKey ? "Key saved. Paste a new one to replace" : "Groq API key (gsk_…)"}
+          aria-label="Groq API key"
+          value={keyDraft}
+          onChange={(e) => setKeyDraft(e.target.value)}
+        />
+        <button className="btn primary" disabled={!keyDraft.trim()} onClick={() => void saveKey(keyDraft)}>SAVE</button>
+        <button className="btn" disabled={!hasKey && !keyDraft.trim()} onClick={() => void runKeyTest()}>TEST</button>
+        {hasKey && <button className="btn" onClick={() => void saveKey("")}>REMOVE</button>}
+      </div>
+      {keyMsg && <p className="note" role="status">{keyMsg}</p>}
+      <p className="note">Stored only on this computer and sent only to api.groq.com.</p>
+      <h2>AI FILES SAVE TO</h2>
+      <div className="folder">
+        <span title={saveDir}>{saveDir}</span>
+        <button className="btn" onClick={() => void chooseSaveDir(false)}>CHANGE</button>
+        <button className="btn" onClick={() => void chooseSaveDir(true)}>DEFAULT</button>
+      </div>
+      <h2>MOTION</h2>
+      <label>
+        <input
+          type="checkbox"
+          checked={anim}
+          onChange={(e) => {
+            setAnim(e.target.checked);
+            setAnimationsEnabled(e.target.checked);
+          }}
+        />
+        Animations (checkmarks, diffs, transitions)
       </label>
 
       <h2>WATCHED FOLDERS</h2>

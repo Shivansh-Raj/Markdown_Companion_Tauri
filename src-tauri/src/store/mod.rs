@@ -56,6 +56,8 @@ pub struct Data {
     pub folders: Vec<String>,
     /// Groq API key for AI file creation (stored locally in the app data file).
     pub groq_api_key: Option<String>,
+    /// Folder for AI-created files; `None` means Documents/MarkdownCompanion.
+    pub ai_save_dir: Option<String>,
     pub window_state: HashMap<String, WindowState>,
     next_id: u64,
 }
@@ -241,6 +243,25 @@ impl Store {
     pub fn set_groq_api_key(&self, key: &str) -> Result<(), String> {
         let key = key.trim();
         self.update(|data| data.groq_api_key = if key.is_empty() { None } else { Some(key.to_string()) })
+    }
+
+    pub fn ai_save_dir(&self) -> Option<String> {
+        self.0.data.lock().unwrap().ai_save_dir.clone()
+    }
+
+    /// `None` restores the default folder. The folder must already exist.
+    pub fn set_ai_save_dir(&self, dir: Option<&str>) -> Result<(), String> {
+        let value = match dir {
+            Some(d) => {
+                let canon = std::fs::canonicalize(d).map_err(|_| "That folder does not exist".to_string())?;
+                if !canon.is_dir() {
+                    return Err("That path is not a folder".into());
+                }
+                Some(canon.to_string_lossy().to_string())
+            }
+            None => None,
+        };
+        self.update(|data| data.ai_save_dir = value)
     }
 
     // ---- settings ----

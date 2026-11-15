@@ -1,7 +1,7 @@
 export function ProgressBar({ done, total }: { done: number; total: number }) {
   const pct = total === 0 ? 0 : Math.round((done / total) * 100);
   return (
-    <div className="progress">
+    <div className={total > 0 && done === total ? "progress complete" : "progress"}>
       <div
         className="progress-track"
         role="progressbar"

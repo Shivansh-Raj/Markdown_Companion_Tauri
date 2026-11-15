@@ -26,11 +26,27 @@ export function pickModel(ids: string[]): string | null {
   return chat[0] ?? null;
 }
 
+/** fetch that turns network failures into a readable message. */
+async function groqFetch(url: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (e) {
+    if (init.signal?.aborted) throw e;
+    throw new Error("Can't reach Groq. Check your internet connection and try again.");
+  }
+}
+
+/** Verifies a key and reports which model would be used. */
+export async function testKey(apiKey: string): Promise<string> {
+  cachedModel = null;
+  return resolveModel(apiKey, new AbortController().signal);
+}
+
 let cachedModel: { key: string; model: string } | null = null;
 
 async function resolveModel(apiKey: string, signal: AbortSignal): Promise<string> {
   if (cachedModel?.key === apiKey) return cachedModel.model;
-  const res = await fetch(`${API}/models`, { signal, headers: { Authorization: `Bearer ${apiKey}` } });
+  const res = await groqFetch(`${API}/models`, { signal, headers: { Authorization: `Bearer ${apiKey}` } });
   if (res.status === 401) throw new Error("Groq rejected the API key. Check it with the KEY button.");
   if (!res.ok) throw new Error(`Could not list Groq models (${res.status}).`);
   const data = await res.json();
@@ -123,7 +139,7 @@ export async function streamChat(opts: {
   onText: (full: string) => void;
 }): Promise<string> {
   const model = await resolveModel(opts.apiKey, opts.signal);
-  const res = await fetch(ENDPOINT, {
+  const res = await groqFetch(ENDPOINT, {
     method: "POST",
     signal: opts.signal,
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${opts.apiKey}` },

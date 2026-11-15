@@ -26,6 +26,8 @@ export const api = {
   setGroqKey: (key: string) => invoke<void>("set_groq_key", { key }),
   createMarkdownFile: (name: string, content: string) =>
     invoke<TrackedFile>("create_markdown_file", { name, content }),
+  getSaveDir: () => invoke<string>("get_save_dir"),
+  setSaveDir: (path: string | null) => invoke<void>("set_save_dir", { path }),
   hideLauncher: () => invoke<void>("hide_launcher"),
   launcherInfo: () => invoke<LauncherInfo>("launcher_info"),
 };

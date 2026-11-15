@@ -195,14 +195,29 @@ fn safe_stem(raw: &str) -> String {
     if out.is_empty() { "untitled".into() } else { out }
 }
 
-/// Writes generated Markdown to `Documents/MarkdownCompanion/<name>.md` (never overwriting) and registers it.
+fn save_dir(app: &AppHandle, store: &Store) -> Result<std::path::PathBuf, String> {
+    match store.ai_save_dir() {
+        Some(d) => Ok(d.into()),
+        None => Ok(app.path().document_dir().map_err(|e| e.to_string())?.join("MarkdownCompanion")),
+    }
+}
+
+/// The folder AI-created files are saved to (custom or default).
+#[tauri::command]
+fn get_save_dir(app: AppHandle, store: State<Store>) -> Result<String, String> {
+    save_dir(&app, &store).map(|p| p.to_string_lossy().to_string())
+}
+
+/// `None` resets to the default folder.
+#[tauri::command]
+fn set_save_dir(path: Option<String>, store: State<Store>) -> Result<(), String> {
+    store.set_ai_save_dir(path.as_deref())
+}
+
+/// Writes generated Markdown to the save folder as `<name>.md` (never overwriting) and registers it.
 #[tauri::command(async)]
 fn create_markdown_file(app: AppHandle, name: String, content: String, store: State<Store>) -> Result<TrackedFile, String> {
-    let dir = app
-        .path()
-        .document_dir()
-        .map_err(|e| e.to_string())?
-        .join("MarkdownCompanion");
+    let dir = save_dir(&app, &store)?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let stem = safe_stem(&name);
     for n in 0..1000u32 {
@@ -447,7 +462,9 @@ pub fn run() {
             list_discovered,
             get_groq_key,
             set_groq_key,
-            create_markdown_file
+            create_markdown_file,
+            get_save_dir,
+            set_save_dir
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

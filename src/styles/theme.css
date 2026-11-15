@@ -184,3 +184,37 @@ body { background: transparent; color: var(--ink); font: 14px/1.45 var(--body); 
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .aiedit .sel-preview { margin: 0 0 4px 22px; padding: 4px 8px; border-left: 4px solid var(--accent); background: var(--bg);
   font-size: 12px; max-height: 64px; overflow: auto; white-space: pre-wrap; }
+
+/* V2: chips, live output */
+.chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 8px; }
+.chips-label { font-family: var(--pixel); font-size: 10px; color: var(--muted); }
+.chip { font: inherit; font-size: 12px; cursor: pointer; color: var(--ink); background: var(--surface);
+  border: 2px solid var(--border); padding: 1px 8px; }
+.chip:hover { background: var(--accent); color: var(--accent-ink); }
+.chip.recent { border-style: dashed; max-width: 100%; }
+.chip:focus-visible { outline: 3px solid var(--border); outline-offset: 1px; }
+.live { margin: 6px 0 8px; padding: 8px 10px; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+  background: var(--surface); border: 2px solid var(--border); font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+/* V2: motion. Everything below is stepped to match the pixel look, short, and switched off by
+   Settings → Motion (html[data-anim="off"]) or the OS reduce-motion setting. */
+@keyframes pop { 0% { transform: scale(1); } 40% { transform: scale(1.35); } 100% { transform: scale(1); } }
+@keyframes burst { 0% { box-shadow: 0 0 0 0 var(--accent); } 100% { box-shadow: 0 0 0 8px transparent; } }
+@keyframes reveal-add { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: none; } }
+@keyframes reveal-del { from { background-position: 0 50%; } to { background-position: 100% 50%; } }
+@keyframes view-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes complete-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.12); } }
+@keyframes fill-flash { 0%, 100% { filter: none; } 50% { filter: brightness(1.3); } }
+
+html[data-anim="on"] .task-checkbox:checked { animation: pop .3s steps(4) 1, burst .4s steps(4) 1; }
+html[data-anim="on"] .diff-row.add { animation: reveal-add .25s steps(5) both; animation-delay: calc(var(--i, 0) * 25ms); }
+html[data-anim="on"] .diff-row.del { animation: reveal-add .25s steps(5) both; animation-delay: calc(var(--i, 0) * 25ms); }
+html[data-anim="on"] .settings, html[data-anim="on"] .ai, html[data-anim="on"] .search, html[data-anim="on"] .results {
+  animation: view-in .2s steps(4) both; }
+html[data-anim="on"] .section-progress.complete { animation: complete-pulse .6s steps(4) 2; background: var(--accent); color: var(--accent-ink); }
+html[data-anim="on"] .progress.complete .progress-fill { animation: fill-flash .6s steps(4) 2; }
+@media (prefers-reduced-motion: reduce) {
+  html[data-anim] .task-checkbox, html[data-anim] .diff-row, html[data-anim] .settings, html[data-anim] .ai,
+  html[data-anim] .search, html[data-anim] .results, html[data-anim] .section-progress, html[data-anim] .progress-fill { animation: none !important; }
+}
+.section-progress.complete { background: var(--accent); color: var(--accent-ink); }

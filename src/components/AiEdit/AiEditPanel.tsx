@@ -12,7 +12,15 @@ import {
   type TextRange,
 } from "../../services/aiEdit";
 import { diffLines, hasChanges, withContext } from "../../services/diff";
+import { loadHistory, pushHistory } from "../../services/history";
 import { TypingCat } from "../AiCreate/TypingCat";
+
+const QUICK_ACTIONS: [string, string][] = [
+  ["Shorten", "Make this more concise without losing any meaning."],
+  ["Fix grammar", "Fix spelling and grammar. Do not change the meaning or structure."],
+  ["Add subtasks", "Break each task into 2-4 smaller subtasks as nested checkboxes."],
+  ["Reorder by priority", "Reorder the items by priority, most important first."],
+];
 
 type Phase = "input" | "generating" | "review";
 const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
@@ -35,6 +43,9 @@ export function AiEditPanel({ content, currentHash, selection, onApply, onClose 
   const [instruction, setInstruction] = useState("");
   const [phase, setPhase] = useState<Phase>("input");
   const [chars, setChars] = useState(0);
+  const [live, setLive] = useState("");
+  const [history, setHistory] = useState<string[]>(loadHistory);
+  const liveRef = useRef<HTMLPreElement>(null);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
@@ -42,6 +53,9 @@ export function AiEditPanel({ content, currentHash, selection, onApply, onClose 
   const startContent = useRef("");
 
   useEffect(() => () => abort.current?.abort(), []);
+  useEffect(() => {
+    if (liveRef.current) liveRef.current.scrollTop = liveRef.current.scrollHeight;
+  }, [live]);
 
   const scope: EditScope =
     scopeKind === "selection" && selection
@@ -67,6 +81,8 @@ export function AiEditPanel({ content, currentHash, selection, onApply, onClose 
       setError("No Groq API key yet. Open the launcher, choose NEW WITH AI and set it with the KEY button.");
       return;
     }
+    setHistory((h) => pushHistory(h, instruction));
+    setLive("");
     startHash.current = currentHash;
     startContent.current = content;
     setPhase("generating");
@@ -79,7 +95,10 @@ export function AiEditPanel({ content, currentHash, selection, onApply, onClose 
         system: buildEditSystemPrompt(scope.kind),
         user: buildEditUserPrompt(instruction, text),
         signal: ctl.signal,
-        onText: (t) => setChars(t.length),
+        onText: (t) => {
+          setChars(t.length);
+          setLive(t);
+        },
       });
       if (!out.trim()) throw new Error("The AI returned nothing. Try rephrasing the instruction.");
       setResult(buildEditedDocument(startContent.current, scope, out));
@@ -174,6 +193,21 @@ export function AiEditPanel({ content, currentHash, selection, onApply, onClose 
               }
             }}
           />
+          <div className="chips" role="group" aria-label="Quick actions">
+            {QUICK_ACTIONS.map(([label, text]) => (
+              <button key={label} className="chip" onClick={() => setInstruction(text)}>{label}</button>
+            ))}
+          </div>
+          {history.length > 0 && (
+            <div className="chips" role="group" aria-label="Recent instructions">
+              <span className="chips-label">Recent</span>
+              {history.map((h) => (
+                <button key={h} className="chip recent" title={h} onClick={() => setInstruction(h)}>
+                  {h.length > 28 ? h.slice(0, 27) + "…" : h}
+                </button>
+              ))}
+            </div>
+          )}
           <p className="note">Completed tasks stay completed. Nothing is saved until you press SAVE.</p>
           <div className="ai-actions">
             <button className="btn primary" disabled={!instruction.trim()} onClick={() => void generate()}>✎ EDIT</button>
@@ -188,8 +222,11 @@ export function AiEditPanel({ content, currentHash, selection, onApply, onClose 
           <div className="ai-status" style={{ justifyContent: "flex-start" }}>
             <TypingCat label={scope.kind === "whole" ? "Editing file" : "Editing selection"} />
           </div>
-          <p className="note">{chars.toLocaleString()} characters received</p>
-          <button className="btn" onClick={() => abort.current?.abort()}>■ STOP</button>
+          <pre className="live" ref={liveRef} aria-label="AI output so far">{live}<span className="ai-caret" aria-hidden="true" /></pre>
+          <div className="ai-actions">
+            <button className="btn" onClick={() => abort.current?.abort()}>■ STOP</button>
+            <span className="hint">{chars.toLocaleString()} characters</span>
+          </div>
         </div>
       )}
 
@@ -206,7 +243,7 @@ export function AiEditPanel({ content, currentHash, selection, onApply, onClose 
               r.kind === "gap" ? (
                 <div key={i} className="diff-row gap">⋯ {r.hidden} unchanged line{r.hidden === 1 ? "" : "s"}</div>
               ) : (
-                <div key={i} className={`diff-row ${r.kind}`}>
+                <div key={i} className={`diff-row ${r.kind}`} style={{ "--i": Math.min(i, 20) } as React.CSSProperties}>
                   <span className="sign" aria-hidden="true">{r.kind === "add" ? "+" : r.kind === "del" ? "−" : " "}</span>
                   <span className="sr-only">{r.kind === "add" ? "added: " : r.kind === "del" ? "removed: " : ""}</span>
                   <span className="txt">{r.text || " "}</span>
