@@ -194,7 +194,7 @@ export function AiCreate({ onBack, onCreated }: { onBack: () => void; onCreated:
             {phase === "generating" ? (
               <TypingCat label={pending || !body ? "Thinking" : `Writing${typeLabel ? " " + typeLabel.toLowerCase() : ""}`} />
             ) : (
-              <span className="progress-label">DRAFT{typeLabel ? ` · ${typeLabel.toUpperCase()}` : ""}</span>
+              <TypingCat mood="waiting" label={`Draft ready${typeLabel ? " (" + typeLabel.toLowerCase() + ")" : ""}. Keep it?`} />
             )}
           </div>
           <div className="ai-preview content" ref={preview} tabIndex={0} aria-label="Generated Markdown preview">

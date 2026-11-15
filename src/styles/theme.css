@@ -134,7 +134,7 @@ body { background: transparent; color: var(--ink); font: 14px/1.45 var(--body); 
 
 /* Typing cat */
 .cat-wrap { display: flex; align-items: center; gap: 10px; }
-.cat { width: 80px; height: 60px; flex: none; }
+.cat { width: 96px; height: 96px; flex: none; overflow: visible; }
 .cat-label { font-family: var(--pixel); font-size: 12px; color: var(--ink); }
 .cat-dots::after { content: ""; animation: ai-dots 1.2s steps(1) infinite; }
 .cat-fill { fill: var(--surface); }
@@ -149,13 +149,23 @@ body { background: transparent; color: var(--ink); font: 14px/1.45 var(--body); 
 .cat-paw { animation: cat-tap 0.5s steps(1) infinite; }
 .cat-paw-r { animation-delay: .25s; }
 .cat-blink { transform-box: fill-box; transform-origin: center; animation: cat-blink 3.2s steps(1) infinite; }
+/* waiting mood: the AI finished and the cat asks whether you want to keep the result */
+.cat-q { fill: var(--accent); transform-box: fill-box; transform-origin: 50% 100%; }
+.cat.waiting .cat-paw, .cat.waiting .cat-key { animation: none; }
+.cat.waiting .cat-eyes { animation: cat-look 2.8s steps(1) infinite; }
+html[data-anim="on"] .cat-q { animation: q-pop .4s steps(4) 1, q-bob 1.2s steps(2) .4s infinite; }
+@keyframes q-pop { from { transform: scale(0); } to { transform: scale(1); } }
+@keyframes q-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1px); } }
+@keyframes cat-look { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-1px); } 50% { transform: translateX(0); } 75% { transform: translateX(1px); } }
+html[data-anim="off"] .cat-paw, html[data-anim="off"] .cat-key, html[data-anim="off"] .cat-blink,
+html[data-anim="off"] .cat-eyes, html[data-anim="off"] .cat-dots::after { animation: none; }
 @keyframes cat-tap { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(1px); } }
 @keyframes cat-key { 0%, 100% { fill: var(--muted); } 50% { fill: var(--accent); } }
 @keyframes cat-blink { 0%, 94%, 100% { transform: scaleY(1); } 96% { transform: scaleY(.15); } }
 @keyframes ai-blink { 50% { opacity: 0; } }
 @keyframes ai-dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
 @media (prefers-reduced-motion: reduce) {
-  .cat-paw, .cat-key, .cat-blink, .ai-caret, .cat-dots::after { animation: none; }
+  .cat-paw, .cat-key, .cat-blink, .cat-eyes, .cat-q, .ai-caret, .cat-dots::after { animation: none !important; }
   .cat-dots::after { content: "…"; }
 }
 

@@ -237,6 +237,9 @@ export function AiEditPanel({ content, currentHash, selection, onApply, onClose 
             <button className="btn" onClick={() => setPhase("input")}>TRY AGAIN</button>
             <button className="btn" onClick={onClose}>DISCARD</button>
           </div>
+          <div className="ai-status" style={{ justifyContent: "flex-start", padding: "6px 10px 0" }}>
+            <TypingCat mood="waiting" label={changed ? "Looks right? Apply or discard" : "The AI changed nothing"} />
+          </div>
           <div className="diff" role="region" aria-label="Proposed changes" tabIndex={0}>
             {!changed && <div className="diff-empty">The AI made no changes.</div>}
             {rows.map((r, i) =>
