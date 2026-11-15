@@ -1,0 +1,27 @@
+/* Layout and typography for rendered Markdown. Colours come from theme variables. */
+.markdown { color: var(--ink); overflow-wrap: anywhere; }
+.markdown > :first-child { margin-top: 0; }
+.markdown h1, .markdown h2, .markdown h3, .markdown h4, .markdown h5, .markdown h6 {
+  font-family: var(--pixel); line-height: 1.25; margin: 1.1em 0 .45em; }
+.markdown h1 { font-size: 18px; border-bottom: 3px solid var(--border); padding-bottom: 4px; }
+.markdown h2 { font-size: 15px; color: var(--accent); }
+.markdown h3 { font-size: 13px; }
+.markdown h4, .markdown h5, .markdown h6 { font-size: 12px; color: var(--muted); }
+.markdown p, .markdown ul, .markdown ol, .markdown blockquote { margin: .5em 0; }
+.markdown ul, .markdown ol { padding-left: 1.4em; }
+.markdown li > ul, .markdown li > ol { margin: .15em 0; }
+.markdown li.task-list-item { list-style: none; margin-left: -1.2em; }
+.markdown a { color: var(--accent); text-decoration: underline; cursor: pointer; }
+.markdown blockquote { border-left: 4px solid var(--accent); padding: 0 .8em; color: var(--muted); }
+.markdown hr { border: 0; border-top: 3px dotted var(--border); margin: 1em 0; }
+.markdown del { opacity: .65; }
+.markdown img { max-width: 100%; height: auto; display: block; border: 2px solid var(--border); }
+.img-missing { display: inline-block; padding: 2px 6px; border: 2px dashed var(--muted); color: var(--muted); font-size: 12px; }
+.inline-code { font: .9em ui-monospace, Menlo, Consolas, monospace; background: var(--inline-bg); padding: 0 .3em; border: 1px solid var(--muted); }
+.code-block { margin: .6em 0; border: 2px solid var(--border); overflow-x: auto; background: var(--code-bg); }
+.code-block pre { margin: 0; padding: 8px 10px; font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; }
+.code-block pre code { font: inherit; }
+.table-scroll { overflow-x: auto; margin: .6em 0; }
+.markdown table { border-collapse: collapse; min-width: 100%; font-size: 13px; }
+.markdown th, .markdown td { border: 2px solid var(--border); padding: 3px 8px; text-align: left; }
+.markdown th { background: var(--accent); color: var(--accent-ink); font-family: var(--pixel); font-size: 11px; }
