@@ -5,6 +5,7 @@ import { api } from "../../services/api";
 import { prettyAccelerator } from "../../services/accelerator";
 import { filterFiles } from "../../services/search";
 import { Settings } from "../Settings/Settings";
+import { AiCreate } from "../AiCreate/AiCreate";
 import type { DiscoveredFile, FileEntry, LauncherInfo } from "../../types";
 
 const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
@@ -25,7 +26,7 @@ export function Launcher() {
   const [selected, setSelected] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<LauncherInfo | null>(null);
-  const [view, setView] = useState<"list" | "settings">("list");
+  const [view, setView] = useState<"list" | "settings" | "ai">("list");
   const input = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
@@ -106,8 +107,8 @@ export function Launcher() {
     if ((e.metaKey || e.ctrlKey) && e.key === ",") {
       e.preventDefault();
       setView((v) => (v === "settings" ? "list" : "settings"));
-    } else if (view === "settings") {
-      return; // the settings panel handles its own keys
+    } else if (view === "settings" || view === "ai") {
+      return; // these panels handle their own keys
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
       setSelected((s) => Math.min(s + 1, items.length - 1));
@@ -140,7 +141,16 @@ export function Launcher() {
         </button>
       </div>
 
-      {view === "settings" ? (
+      {view === "ai" ? (
+        <AiCreate
+          onBack={() => setView("list")}
+          onCreated={() => {
+            void refresh().catch(() => {});
+            setView("list");
+            void api.hideLauncher();
+          }}
+        />
+      ) : view === "settings" ? (
         <Settings onBack={() => setView("list")} onChanged={() => void refresh().catch(() => {})} />
       ) : (
         <>
@@ -205,7 +215,10 @@ export function Launcher() {
           {error && <div className="error" role="alert">{error}</div>}
           {info?.shortcut_error && <div className="error" role="alert">{info.shortcut_error}</div>}
           <div className="footer">
-            <button className="btn primary" onClick={() => void addFile()}>+ ADD FILE</button>
+            <span style={{ display: "flex", gap: 8 }}>
+              <button className="btn primary" onClick={() => void addFile()}>+ ADD FILE</button>
+              <button className="btn" onClick={() => setView("ai")}>✎ NEW WITH AI</button>
+            </span>
             <span className="hint">
               ↑↓ select · Enter open · Esc close · {isMac ? "⌘" : "Ctrl+"}, settings
               {info && ` · ${prettyAccelerator(info.shortcut, isMac)} toggles`}

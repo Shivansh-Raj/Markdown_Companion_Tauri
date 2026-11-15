@@ -169,6 +169,69 @@ fn open_external(app: AppHandle, url: String) -> Result<(), String> {
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
 }
 
+// ---- AI file creation ----
+
+#[tauri::command]
+fn get_groq_key(store: State<Store>) -> Option<String> {
+    store.groq_api_key()
+}
+
+#[tauri::command]
+fn set_groq_key(key: String, store: State<Store>) -> Result<(), String> {
+    store.set_groq_api_key(&key)
+}
+
+/// Reduces a title to a safe file stem: letters, digits, `-` and `_` only.
+fn safe_stem(raw: &str) -> String {
+    let mut out = String::new();
+    for c in raw.chars() {
+        if c.is_alphanumeric() {
+            out.push(c.to_ascii_lowercase());
+        } else if !out.ends_with('-') && !out.is_empty() {
+            out.push('-');
+        }
+    }
+    let out: String = out.trim_matches('-').chars().take(60).collect();
+    if out.is_empty() { "untitled".into() } else { out }
+}
+
+/// Writes generated Markdown to `Documents/MarkdownCompanion/<name>.md` (never overwriting) and registers it.
+#[tauri::command(async)]
+fn create_markdown_file(app: AppHandle, name: String, content: String, store: State<Store>) -> Result<TrackedFile, String> {
+    let dir = app
+        .path()
+        .document_dir()
+        .map_err(|e| e.to_string())?
+        .join("MarkdownCompanion");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let stem = safe_stem(&name);
+    for n in 0..1000u32 {
+        let file = if n == 0 { format!("{stem}.md") } else { format!("{stem}-{n}.md") };
+        let path = dir.join(file);
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut f) => {
+                use std::io::Write;
+                f.write_all(content.as_bytes()).map_err(|e| e.to_string())?;
+                return store.register(&path.to_string_lossy());
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Err("Could not find a free file name".into())
+}
+
+#[cfg(test)]
+mod ai_tests {
+    use super::safe_stem;
+    #[test]
+    fn stems_are_safe() {
+        assert_eq!(safe_stem("Launch Plan: Week 1!"), "launch-plan-week-1");
+        assert_eq!(safe_stem("../../etc/passwd"), "etc-passwd");
+        assert_eq!(safe_stem("!!!"), "untitled");
+    }
+}
+
 // ---- launcher, settings, shortcut ----
 
 #[tauri::command]
@@ -381,7 +444,10 @@ pub fn run() {
             list_folders,
             add_folder,
             remove_folder,
-            list_discovered
+            list_discovered,
+            get_groq_key,
+            set_groq_key,
+            create_markdown_file
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -54,6 +54,8 @@ pub struct Data {
     pub files: Vec<TrackedFile>,
     pub settings: Settings,
     pub folders: Vec<String>,
+    /// Groq API key for AI file creation (stored locally in the app data file).
+    pub groq_api_key: Option<String>,
     pub window_state: HashMap<String, WindowState>,
     next_id: u64,
 }
@@ -228,6 +230,17 @@ impl Store {
 
     pub fn clear_open(&self) {
         let _ = self.update(|data| data.window_state.values_mut().for_each(|w| w.open = false));
+    }
+
+    // ---- AI ----
+
+    pub fn groq_api_key(&self) -> Option<String> {
+        self.0.data.lock().unwrap().groq_api_key.clone()
+    }
+
+    pub fn set_groq_api_key(&self, key: &str) -> Result<(), String> {
+        let key = key.trim();
+        self.update(|data| data.groq_api_key = if key.is_empty() { None } else { Some(key.to_string()) })
     }
 
     // ---- settings ----

@@ -13,6 +13,8 @@ import {
 } from "../../services/markdownSync";
 import { MarkdownRenderer } from "../MarkdownRenderer/MarkdownRenderer";
 import { ProgressBar } from "../ProgressBar/ProgressBar";
+import { AiEditPanel } from "../AiEdit/AiEditPanel";
+import { locateSelection } from "../../services/aiEdit";
 import type { FileSnapshot, FileStatus, SyncEvent, TrackedFile } from "../../types";
 
 export function TrackerWindow({ id }: { id: string }) {
@@ -32,6 +34,11 @@ export function TrackerWindow({ id }: { id: string }) {
   const editBase = useRef<FileSnapshot | null>(null);
   const editing = draft !== null;
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // AI edit: results land in the edit draft (never straight on disk); `aiUndo` holds earlier drafts.
+  const [aiOpen, setAiOpen] = useState(false);
+  const [aiUndo, setAiUndo] = useState<string[]>([]);
+  const [aiSelection, setAiSelection] = useState<{ start: number; end: number } | null>(null);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
   const editingRef = useRef(false);
   editingRef.current = editing;
 
@@ -132,7 +139,43 @@ export function TrackerWindow({ id }: { id: string }) {
     }
     setConfirmDiscard(false);
     setDraft(null);
+    setAiUndo([]);
     editBase.current = null;
+  };
+
+  const openAi = () => {
+    if (!snap) return;
+    let sel: { start: number; end: number } | null = null;
+    const ta = editorRef.current;
+    if (ta) {
+      if (ta.selectionEnd > ta.selectionStart && ta.value.slice(ta.selectionStart, ta.selectionEnd).trim()) {
+        sel = { start: ta.selectionStart, end: ta.selectionEnd };
+      }
+    } else {
+      const text = window.getSelection()?.toString() ?? "";
+      if (text.trim() && contentRef.current?.contains(window.getSelection()?.anchorNode ?? null)) {
+        sel = locateSelection(snap.content, text);
+      }
+    }
+    setAiSelection(sel);
+    setAiOpen(true);
+  };
+
+  const applyAi = (next: string) => {
+    if (!snap) return;
+    if (draft === null) editBase.current = snap;
+    setAiUndo((u) => [...u, draft ?? snap.content]);
+    setDraft(next);
+    setNotice(null);
+    setAiOpen(false);
+  };
+
+  const undoAi = () => {
+    setAiUndo((u) => {
+      if (!u.length) return u;
+      setDraft(u[u.length - 1]);
+      return u.slice(0, -1);
+    });
   };
 
   const saveEdit = async () => {
@@ -143,11 +186,13 @@ export function TrackerWindow({ id }: { id: string }) {
     try {
       if (draft === base.content && snapRef.current?.hash === base.hash) {
         setDraft(null);
+        setAiUndo([]);
         return;
       }
       const saved = await api.saveTrackerContent(id, base.hash, draft);
       setSnap(saved);
       setDraft(null);
+      setAiUndo([]);
       editBase.current = null;
       setNotice(null);
     } catch (e) {
@@ -197,13 +242,14 @@ export function TrackerWindow({ id }: { id: string }) {
     <div className="tracker">
       <div className="titlebar" data-tauri-drag-region>
         <span className="title" data-tauri-drag-region>{info?.display_name ?? "…"}</span>
+        <button className="btn" onClick={openAi} onMouseDown={(e) => e.preventDefault()} disabled={!snap || unavailable || busy || aiOpen} aria-label="Edit with AI">AI</button>
         {!editing && (
           <button className="btn" onClick={startEdit} disabled={!snap || unavailable} aria-label="Edit Markdown source">EDIT</button>
         )}
         <button className="btn" onClick={() => void win.hide()} aria-label="Hide tracker">–</button>
         <button className="btn" onClick={() => void win.close()} aria-label="Close tracker">✕</button>
       </div>
-      {!editing && doc && doc.total > 0 && <ProgressBar done={doc.done} total={doc.total} />}
+      {!editing && !aiOpen && doc && doc.total > 0 && <ProgressBar done={doc.done} total={doc.total} />}
       {unavailable && (
         <div className="error" role="alert">
           {status.kind === "missing"
@@ -218,15 +264,25 @@ export function TrackerWindow({ id }: { id: string }) {
           <button className="btn" onClick={() => setNotice(null)} aria-label="Dismiss">✕</button>
         </div>
       )}
-      {editing && (
+      {editing && !aiOpen && (
         <div className="editbar">
           <button className="btn primary" onClick={() => void saveEdit()} disabled={busy}>SAVE</button>
           <button className="btn" onClick={cancelEdit} disabled={busy}>{confirmDiscard ? "DISCARD?" : "CANCEL"}</button>
-          <span className="hint">Editing source · Cmd/Ctrl+S saves</span>
+          <button className="btn" onClick={undoAi} disabled={busy || aiUndo.length === 0} title="Undo the last AI edit">UNDO AI</button>
+          <span className="hint">Cmd/Ctrl+S saves</span>
         </div>
       )}
-      {editing ? (
+      {aiOpen && snap ? (
+        <AiEditPanel
+          content={draft ?? snap.content}
+          currentHash={snap.hash}
+          selection={aiSelection}
+          onApply={applyAi}
+          onClose={() => setAiOpen(false)}
+        />
+      ) : editing ? (
         <textarea
+          ref={editorRef}
           className="editor"
           value={draft}
           autoFocus

@@ -22,6 +22,10 @@ export const api = {
   addFolder: (path: string) => invoke<string>("add_folder", { path }),
   removeFolder: (path: string) => invoke<void>("remove_folder", { path }),
   listDiscovered: () => invoke<DiscoveredFile[]>("list_discovered"),
+  getGroqKey: () => invoke<string | null>("get_groq_key"),
+  setGroqKey: (key: string) => invoke<void>("set_groq_key", { key }),
+  createMarkdownFile: (name: string, content: string) =>
+    invoke<TrackedFile>("create_markdown_file", { name, content }),
   hideLauncher: () => invoke<void>("hide_launcher"),
   launcherInfo: () => invoke<LauncherInfo>("launcher_info"),
 };

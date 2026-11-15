@@ -84,3 +84,28 @@ export function parseDocument(source: string): ParsedDoc {
     total: tasks.length,
   };
 }
+
+export interface SectionInfo {
+  title: string;
+  depth: number;
+  /** UTF-16 range of the heading line through the end of its sub-sections. */
+  start: number;
+  end: number;
+}
+
+/** Heading-delimited sections (a section includes its nested sub-sections). Headings in code fences are ignored. */
+export function listSections(source: string): SectionInfo[] {
+  const tree = processor.parse(source) as Root;
+  const heads: { title: string; depth: number; start: number }[] = [];
+  const walk = (node: AnyNode) => {
+    if (node.type === "heading" && node.position?.start.offset != null) {
+      heads.push({ title: plainText(node).trim(), depth: node.depth, start: node.position.start.offset });
+    }
+    if ("children" in node) (node.children as AnyNode[]).forEach(walk);
+  };
+  walk(tree);
+  return heads.map((h, i) => {
+    const next = heads.slice(i + 1).find((n) => n.depth <= h.depth);
+    return { ...h, end: next ? next.start : source.length };
+  });
+}
