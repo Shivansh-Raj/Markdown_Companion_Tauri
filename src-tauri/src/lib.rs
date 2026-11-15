@@ -137,6 +137,25 @@ fn toggle_task(
     Ok(saved)
 }
 
+/// Saves the full text from the edit mode, only if the file still matches `expected_hash`.
+#[tauri::command(async)]
+fn save_tracker_content(
+    id: String,
+    expected_hash: String,
+    content: String,
+    store: State<Store>,
+    locks: State<FileLocks>,
+    watch: State<WatchService>,
+) -> Result<FileSnapshot, ToggleError> {
+    let file = store
+        .get(&id)
+        .ok_or(ToggleError::Failed { message: "Unknown tracker".into() })?;
+    let path = Path::new(&file.canonical_path);
+    let saved = locks.save_content(path, &expected_hash, &content)?;
+    watch.state.note_snapshot(path, &saved.hash);
+    Ok(saved)
+}
+
 #[tauri::command]
 fn tracker_info(id: String, store: State<Store>) -> Result<TrackedFile, String> {
     store.get(&id).ok_or_else(|| "Unknown tracker".into())
@@ -351,6 +370,7 @@ pub fn run() {
             read_tracker_file,
             reload_tracker,
             toggle_task,
+            save_tracker_content,
             tracker_info,
             hide_launcher,
             open_external,

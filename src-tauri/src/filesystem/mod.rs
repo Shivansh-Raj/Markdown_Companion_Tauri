@@ -93,6 +93,25 @@ impl FileLocks {
         write_atomic(path, updated.as_bytes(), &meta).map_err(|e| failed(format!("Cannot save file: {e}")))?;
         Ok(FileSnapshot { hash: hash_bytes(updated.as_bytes()), content: updated })
     }
+
+    /// Replaces the whole file with `content`, only if it still matches `expected_hash`.
+    /// Used by the explicit edit mode; the user's text is written exactly as given.
+    pub fn save_content(&self, path: &Path, expected_hash: &str, content: &str) -> Result<FileSnapshot, ToggleError> {
+        let lock = self.lock_for(path);
+        let _guard = lock.lock().unwrap();
+
+        let meta = std::fs::metadata(path).map_err(|e| failed(format!("Cannot access file: {e}")))?;
+        if meta.permissions().readonly() {
+            return Err(failed("File is read-only"));
+        }
+        let bytes = std::fs::read(path).map_err(|e| failed(format!("Cannot read file: {e}")))?;
+        let current = snapshot_from_bytes(bytes).map_err(failed)?;
+        if current.hash != expected_hash {
+            return Err(ToggleError::Stale { content: current.content, hash: current.hash });
+        }
+        write_atomic(path, content.as_bytes(), &meta).map_err(|e| failed(format!("Cannot save file: {e}")))?;
+        Ok(FileSnapshot { hash: hash_bytes(content.as_bytes()), content: content.to_string() })
+    }
 }
 
 /// Writes to a temp file beside the target, then atomically renames over it.
@@ -220,5 +239,28 @@ mod tests {
         assert!(results.iter().filter(|r| r.is_err()).all(|r| matches!(r, Err(ToggleError::Stale { .. }))));
         let final_text = std::fs::read_to_string(&p).unwrap();
         assert_eq!(final_text.matches("[x]").count(), 1);
+    }
+
+    #[test]
+    fn save_content_writes_exactly_and_refuses_stale_or_read_only() {
+        let (p, snap) = setup("save", DOC);
+        let locks = FileLocks::default();
+        let text = "# New\r\n- [ ] é\n";
+        let saved = locks.save_content(&p, &snap.hash, text).unwrap();
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), text);
+        assert_eq!(saved.hash, hash_bytes(text.as_bytes()));
+
+        // Old hash is now stale: nothing written, fresh content returned.
+        match locks.save_content(&p, &snap.hash, "overwrite").unwrap_err() {
+            ToggleError::Stale { content, .. } => assert_eq!(content, text),
+            other => panic!("expected stale, got {other:?}"),
+        }
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), text);
+
+        let mut perms = std::fs::metadata(&p).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&p, perms).unwrap();
+        let err = locks.save_content(&p, &saved.hash, "x").unwrap_err();
+        assert!(matches!(&err, ToggleError::Failed { message } if message.contains("read-only")));
     }
 }

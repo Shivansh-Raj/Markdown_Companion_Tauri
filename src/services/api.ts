@@ -9,6 +9,8 @@ export const api = {
   reloadTracker: (id: string) => invoke<FileSnapshot>("reload_tracker", { id }),
   toggleTask: (id: string, expectedHash: string, byteOffset: number, checked: boolean) =>
     invoke<FileSnapshot>("toggle_task", { id, expectedHash, byteOffset, checked }),
+  saveTrackerContent: (id: string, expectedHash: string, content: string) =>
+    invoke<FileSnapshot>("save_tracker_content", { id, expectedHash, content }),
   trackerInfo: (id: string) => invoke<TrackedFile>("tracker_info", { id }),
   openExternal: (url: string) => invoke<void>("open_external", { url }),
   unregisterFile: (id: string) => invoke<void>("unregister_file", { id }),

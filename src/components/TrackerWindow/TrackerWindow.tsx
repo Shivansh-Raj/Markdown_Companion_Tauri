@@ -27,6 +27,13 @@ export function TrackerWindow({ id }: { id: string }) {
   const pendingExternal = useRef<SyncEvent | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const savedScroll = useRef<number | null>(null);
+  // Edit mode: `draft` is the textarea text, `editBase` the file version it was started from.
+  const [draft, setDraft] = useState<string | null>(null);
+  const editBase = useRef<FileSnapshot | null>(null);
+  const editing = draft !== null;
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const editingRef = useRef(false);
+  editingRef.current = editing;
 
   snapRef.current = snap;
 
@@ -111,6 +118,57 @@ export function TrackerWindow({ id }: { id: string }) {
     }
   };
 
+  const startEdit = () => {
+    if (!snap || busy) return;
+    editBase.current = snap;
+    setNotice(null);
+    setDraft(snap.content);
+  };
+
+  const cancelEdit = () => {
+    if (draft !== null && draft !== editBase.current?.content && !confirmDiscard) {
+      setConfirmDiscard(true); // second press discards
+      return;
+    }
+    setConfirmDiscard(false);
+    setDraft(null);
+    editBase.current = null;
+  };
+
+  const saveEdit = async () => {
+    const base = editBase.current;
+    if (draft === null || !base || busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      if (draft === base.content && snapRef.current?.hash === base.hash) {
+        setDraft(null);
+        return;
+      }
+      const saved = await api.saveTrackerContent(id, base.hash, draft);
+      setSnap(saved);
+      setDraft(null);
+      editBase.current = null;
+      setNotice(null);
+    } catch (e) {
+      const { snapshot, message } = describeToggleError(e);
+      if (snapshot) {
+        // Keep the user's text; the next SAVE deliberately replaces the newer disk version.
+        editBase.current = snapshot;
+        setSnap(snapshot);
+        setNotice("The file changed on disk while you were editing. Your text is kept; press SAVE again to overwrite it, or CANCEL to discard yours.");
+      } else {
+        setNotice(message);
+      }
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+      const queued = pendingExternal.current;
+      pendingExternal.current = null;
+      if (queued) applyExternalRef.current(queued);
+    }
+  };
+
   const retry = async () => {
     try {
       const fresh = await api.reloadTracker(id);
@@ -125,7 +183,7 @@ export function TrackerWindow({ id }: { id: string }) {
   // Keyboard: Esc hides the tracker (it keeps its state and can be summoned again).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") void getCurrentWindow().hide();
+      if (e.key === "Escape" && !editingRef.current) void getCurrentWindow().hide();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -139,10 +197,13 @@ export function TrackerWindow({ id }: { id: string }) {
     <div className="tracker">
       <div className="titlebar" data-tauri-drag-region>
         <span className="title" data-tauri-drag-region>{info?.display_name ?? "…"}</span>
+        {!editing && (
+          <button className="btn" onClick={startEdit} disabled={!snap || unavailable} aria-label="Edit Markdown source">EDIT</button>
+        )}
         <button className="btn" onClick={() => void win.hide()} aria-label="Hide tracker">–</button>
         <button className="btn" onClick={() => void win.close()} aria-label="Close tracker">✕</button>
       </div>
-      {doc && doc.total > 0 && <ProgressBar done={doc.done} total={doc.total} />}
+      {!editing && doc && doc.total > 0 && <ProgressBar done={doc.done} total={doc.total} />}
       {unavailable && (
         <div className="error" role="alert">
           {status.kind === "missing"
@@ -157,6 +218,32 @@ export function TrackerWindow({ id }: { id: string }) {
           <button className="btn" onClick={() => setNotice(null)} aria-label="Dismiss">✕</button>
         </div>
       )}
+      {editing && (
+        <div className="editbar">
+          <button className="btn primary" onClick={() => void saveEdit()} disabled={busy}>SAVE</button>
+          <button className="btn" onClick={cancelEdit} disabled={busy}>{confirmDiscard ? "DISCARD?" : "CANCEL"}</button>
+          <span className="hint">Editing source · Cmd/Ctrl+S saves</span>
+        </div>
+      )}
+      {editing ? (
+        <textarea
+          className="editor"
+          value={draft}
+          autoFocus
+          spellCheck={false}
+          aria-label="Markdown source"
+          onChange={(e) => { setDraft(e.target.value); setConfirmDiscard(false); }}
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+              e.preventDefault();
+              void saveEdit();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              cancelEdit();
+            }
+          }}
+        />
+      ) : (
       <div
         className="content"
         ref={contentRef}
@@ -178,6 +265,7 @@ export function TrackerWindow({ id }: { id: string }) {
           )
         )}
       </div>
+      )}
     </div>
   );
 }

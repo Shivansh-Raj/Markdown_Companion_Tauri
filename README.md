@@ -15,6 +15,9 @@ The full product brief is in `markdown_desktop_companion_coding_agent_brief.md`.
 4. Type to search, `↑/↓` to move, `Enter` to open. Selecting an open file focuses its window.
 5. In a tracker: click checkboxes, scroll, `–` hides it, `✕` closes it, `Esc` hides it.
    The progress bar and per-heading counts update as you tick tasks.
+   **EDIT** switches the window to the raw Markdown source; **SAVE** (or Cmd/Ctrl+S) writes the whole
+   file, **CANCEL** discards. A save is refused if the file changed on disk since you started editing
+   (your text is kept; saving again deliberately overwrites).
 6. Edit the file in any editor and the window refreshes by itself.
 7. Quit from the tray menu (Cmd+Q is intentionally ignored for this background app).
 
@@ -92,7 +95,7 @@ Before publishing, follow [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md)
 - The shortcut opens the launcher; picking an open tracker focuses it.
 - Folder discovery is opt-in and bounded (3 levels, 500 files; hidden folders, `node_modules`,
   `target` and symlinks skipped).
-- Normal Markdown is read-only; only task checkboxes are interactive.
+- The rendered view is read-only apart from task checkboxes; text is edited via the explicit EDIT mode.
 
 ## Known limitations
 
