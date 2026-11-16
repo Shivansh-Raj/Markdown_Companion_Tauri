@@ -10,15 +10,15 @@ const QUESTION: [number, number, number][] = [
   [1, 0, 3], [0, 1, 2], [3, 1, 2], [3, 2, 2], [2, 3, 2], [2, 4, 1], [2, 6, 1],
 ];
 
-export function TypingCat({ label, mood = "typing" }: { label: string; mood?: CatMood }) {
+/** `perch` = small decorative cat (no label, headroom cropped) that sits on top of a button. */
+export function TypingCat({ label, mood = "typing", perch = false }: { label: string; mood?: CatMood; perch?: boolean }) {
   const waiting = mood === "waiting";
   return (
-    <div className="cat-wrap" role="status" aria-live="polite">
+    <div className={perch ? "cat-wrap cat-perched" : "cat-wrap"} {...(perch ? { "aria-hidden": true } : { role: "status", "aria-live": "polite" })}>
       <svg
         className={waiting ? "cat waiting" : "cat"}
-        viewBox="0 -8 32 32"
-        width="144"
-        height="144"
+        viewBox={perch ? "0 2 32 22" : "0 -8 32 32"}
+        {...(perch ? { width: 64, height: 44 } : { width: 144, height: 144 })}
         shapeRendering="crispEdges"
         aria-hidden="true"
       >
@@ -53,10 +53,12 @@ export function TypingCat({ label, mood = "typing" }: { label: string; mood?: Ca
           </g>
         )}
       </svg>
-      <div className="cat-label">
-        {label}
-        {!waiting && <span className="cat-dots" aria-hidden="true" />}
-      </div>
+      {!perch && (
+        <div className="cat-label">
+          {label}
+          {!waiting && <span className="cat-dots" aria-hidden="true" />}
+        </div>
+      )}
     </div>
   );
 }

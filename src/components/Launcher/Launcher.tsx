@@ -6,6 +6,7 @@ import { prettyAccelerator } from "../../services/accelerator";
 import { filterFiles } from "../../services/search";
 import { Settings } from "../Settings/Settings";
 import { AiCreate } from "../AiCreate/AiCreate";
+import { TypingCat } from "../AiCreate/TypingCat";
 import type { DiscoveredFile, FileEntry, LauncherInfo } from "../../types";
 
 const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
@@ -216,7 +217,10 @@ export function Launcher() {
           {info?.shortcut_error && <div className="error" role="alert">{info.shortcut_error}</div>}
           <div className="footer">
             <span style={{ display: "flex", gap: 8 }}>
-              <button className="btn primary" onClick={() => void addFile()}>+ ADD FILE</button>
+              <span className="cat-perch">
+                <TypingCat label="" perch />
+                <button className="btn primary" onClick={() => void addFile()}>+ ADD FILE</button>
+              </span>
               <button className="btn" onClick={() => setView("ai")}>✎ NEW WITH AI</button>
             </span>
             <span className="hint">
