@@ -166,6 +166,28 @@ export function useVoiceSession() {
     setChunks(list);
   }, []);
 
+  /** Transcribes a stopped session again from its saved audio (recovered recordings, or after failures). */
+  const retranscribe = useCallback(async () => {
+    const m = metaRef.current;
+    if (!m) return;
+    const list: TranscriptChunk[] = [];
+    let offset = 0;
+    for (let i = 0; i < m.chunks; i++) {
+      try {
+        const wav = await api.voiceReadChunk(m.id, i);
+        const ms = Math.max(0, Math.round((wav.byteLength - 44) / 32)); // 16 kHz, 16-bit mono = 32 bytes per ms
+        list.push({ index: i, startMs: offset, endMs: offset + ms, text: "", words: [], status: "pending" });
+        offset += ms;
+      } catch {
+        break;
+      }
+    }
+    if (!list.length) throw new Error("The audio of this recording was deleted, so it cannot be transcribed again.");
+    chunksRef.current = list;
+    setChunks(list);
+    for (const base of list) enqueue(m.id, { ...base });
+  }, [enqueue]);
+
   const reset = useCallback(() => {
     metaRef.current = null;
     chunksRef.current = [];
@@ -176,5 +198,5 @@ export function useVoiceSession() {
     setNotice(null);
   }, []);
 
-  return { meta, phase, activeMs, level, chunks, notice, pending, start, pause, resume, stop, retry, open, reset, setNotice };
+  return { meta, phase, activeMs, level, chunks, notice, pending, start, pause, resume, stop, retry, retranscribe, open, reset, setNotice };
 }

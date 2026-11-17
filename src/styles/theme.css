@@ -289,3 +289,6 @@ html[data-anim="on"] .rec-pill:not(.paused) { animation: rec-blink 1.2s steps(1)
 .voice-styles { display: flex; gap: 6px; flex-wrap: wrap; }
 .voice-tag { font-family: var(--pixel); font-size: 9px; padding: 1px 4px; margin-right: 4px; background: var(--inline-bg); border: 1px solid var(--border); }
 .voice-better { color: var(--ink); }
+.voice-ideas { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--surface); border: 2px dashed var(--border); }
+.voice-idea { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; line-height: 1.4; }
+.voice-idea .note { flex-basis: 100%; margin: 0; }

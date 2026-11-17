@@ -98,3 +98,18 @@ Original audio/transcript are **separate from** and never modified by summaries.
 - No new JS runtime dependencies planned.
 - Info.plist gains `NSMicrophoneUsageDescription`; CSP unchanged (Groq already allowed; transcription uses the same host).
 - Bundle size +~1 MB; macOS 11+ unchanged.
+
+## 10. Implementation status
+
+| Phase | Status |
+|---|---|
+| 1 Recording (cpal, WAV, chunker, tray REC, recovery) | done |
+| 2 Voice window, Groq Whisper chunked transcription, quick voice note | done |
+| 3 Meeting analyses + Markdown export (new / append / separate) | done |
+| 4 Practice mode: local speaking analytics + AI coach | done |
+| 5 Follow-up detector, live question suggestions, session list (search/filter/delete/re-transcribe) | done |
+
+Known limits (by design, see section 2): no system-audio capture (use a loopback device as the microphone), transcription is
+near-live not word-by-word, vocal variation (pitch/volume) is not measured, and live question suggestions are opt-in because they send
+the recent transcript to Groq about once a minute. Everything that needs a real microphone was verified only by unit tests; run the
+manual checklist in section 8 before relying on it.

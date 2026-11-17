@@ -7,7 +7,9 @@ import {
 } from "../../services/voice/transcript";
 import { MODE_LABELS, type SessionMeta, type VoiceDevice, type VoiceMode } from "../../services/voice/types";
 import { AnalysisPanel } from "./AnalysisPanel";
+import { FollowUpPanel } from "./FollowUpPanel";
 import { PracticePanel } from "./PracticePanel";
+import { useQuestions } from "./useQuestions";
 import { useVoiceSession } from "./useVoiceSession";
 
 const CONSENT_KEY = "voice-cloud-consent";
@@ -37,6 +39,9 @@ export function VoiceWindow() {
   const [note, setNote] = useState("");
   const [noting, setNoting] = useState(false);
   const [armed, setArmed] = useState<"audio" | "session" | null>(null);
+  const [query, setQuery] = useState("");
+  const [modeFilter, setModeFilter] = useState<VoiceMode | "all">("all");
+  const [rowArmed, setRowArmed] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -54,6 +59,14 @@ export function VoiceWindow() {
   const full = useMemo(() => transcriptText(v.chunks), [v.chunks]);
   const failed = v.chunks.filter((c) => c.status === "failed");
   const recording = v.phase === "recording" || v.phase === "paused";
+  const q = useQuestions({ active: recording && v.meta?.mode === "meeting", paused: v.phase === "paused", chunks: v.chunks, transcribing: v.pending });
+  const shown = sessions.filter((s) => (modeFilter === "all" || s.mode === modeFilter) && s.title.toLowerCase().includes(query.trim().toLowerCase()));
+
+  const deleteRow = async (id: string) => {
+    if (rowArmed !== id) { setRowArmed(id); return; }
+    setRowArmed(null);
+    await guard(async () => { await api.voiceDeleteSession(id); await refreshSessions(); });
+  };
 
   const begin = async () => {
     if (!mode) return;
@@ -145,15 +158,31 @@ export function VoiceWindow() {
               ))}
             </div>
             <h3 className="voice-h">RECENT SESSIONS</h3>
+            <div className="voice-actions">
+              <input className="search" style={{ flex: 1, minWidth: 140, margin: 0 }} placeholder="Search sessions…" aria-label="Search sessions"
+                value={query} onChange={(e) => setQuery(e.target.value)} />
+              <select className="search" style={{ margin: 0, width: "auto" }} aria-label="Filter by type" value={modeFilter}
+                onChange={(e) => setModeFilter(e.target.value as VoiceMode | "all")}>
+                <option value="all">All types</option>
+                {(Object.keys(MODE_LABELS) as VoiceMode[]).map((m) => <option key={m} value={m}>{MODE_LABELS[m]}</option>)}
+              </select>
+            </div>
             <ul className="results voice-sessions" aria-label="Recent voice sessions">
-              {sessions.map((s) => (
+              {shown.map((s) => (
                 <li key={s.id} className="row" onClick={() => void v.open(s)}>
                   <span className="name">{s.title}</span>
-                  <span className="badge">{MODE_LABELS[s.mode]}{s.status === "interrupted" ? " · RECOVERED" : ""}</span>
+                  <span>
+                    <span className="badge">{MODE_LABELS[s.mode]}{s.status === "interrupted" ? " · RECOVERED" : ""}</span>
+                    <button className="btn" style={{ marginLeft: 6, padding: "0 5px" }} aria-label={`Delete ${s.title}`}
+                      title="Delete this session (audio, transcript and analyses)" tabIndex={-1}
+                      onClick={(e) => { e.stopPropagation(); void deleteRow(s.id); }}>
+                      {rowArmed === s.id ? "SURE?" : "✕"}
+                    </button>
+                  </span>
                   <span className="path">{new Date(s.createdAtMs).toLocaleString()} · {formatClock(s.durationMs)}</span>
                 </li>
               ))}
-              {sessions.length === 0 && <li className="empty" role="presentation">No recordings yet.</li>}
+              {shown.length === 0 && <li className="empty" role="presentation">{sessions.length ? "No sessions match." : "No recordings yet."}</li>}
             </ul>
           </>
         )}
@@ -165,7 +194,7 @@ export function VoiceWindow() {
             {!consent ? (
               <>
                 <p className="note">
-                  Speech is turned into text by Groq (api.groq.com). Short audio chunks are sent there while you record.
+                  Speech is turned into text by Groq (api.groq.com): short audio chunks are sent there while you record, and the text is sent there when you ask for analysis.
                   Nothing is recorded until you press START, and a REC indicator stays visible the whole time.
                 </p>
                 <button className="btn primary" onClick={() => { writeConsent(); setConsent(true); }}>I UNDERSTAND</button>
@@ -224,8 +253,29 @@ export function VoiceWindow() {
               {v.chunks.length === 0 && <p className="note">{recording ? "Listening… text appears a few seconds after you speak." : "No speech was captured."}</p>}
             </div>
 
+            {recording && v.meta.mode === "meeting" && (
+              <div className="voice-ideas">
+                <label className="voice-check" title="Sends the most recent part of the transcript to Groq about once a minute">
+                  <input type="checkbox" checked={q.enabled} onChange={(e) => q.setEnabled(e.target.checked)} /> Suggest questions I could ask
+                  {q.enabled && q.thinking && <span className="note"> · thinking…</span>}
+                </label>
+                {q.enabled && q.ideas.map((i) => (
+                  <div key={i.id} className="voice-idea">
+                    <span className="voice-tag">{i.kind.toUpperCase()}</span> {i.question}
+                    {i.reason && <span className="note"> — {i.reason}</span>}
+                    <button className="btn" onClick={() => void navigator.clipboard?.writeText(i.question)}>COPY</button>
+                    <button className="btn" onClick={() => q.dismiss(i.id)} aria-label="Dismiss suggestion">✕</button>
+                  </div>
+                ))}
+                {q.enabled && <p className="note">Only if you want them. Nothing here interrupts the recording.</p>}
+              </div>
+            )}
+
             {v.phase === "stopped" && (
               <div className="voice-actions">
+                {v.chunks.length === 0 && v.meta.chunks > 0 && v.pending === 0 && (
+                  <button className="btn primary" onClick={() => void guard(v.retranscribe)}>TRANSCRIBE RECORDING</button>
+                )}
                 {v.pending > 0 && <span className="note">Transcribing the last part… ({v.pending})</span>}
                 {failed.length > 0 && v.pending === 0 && <span className="note">{failed.length} part(s) failed. Use RETRY above.</span>}
                 <button className="btn primary" disabled={busy || !full || v.pending > 0}
@@ -241,7 +291,10 @@ export function VoiceWindow() {
             )}
 
             {v.phase === "stopped" && v.meta.mode === "meeting" && (
-              <AnalysisPanel meta={v.meta} chunks={v.chunks} ready={!!full && v.pending === 0} />
+              <>
+                <AnalysisPanel meta={v.meta} chunks={v.chunks} ready={!!full && v.pending === 0} />
+                <FollowUpPanel meta={v.meta} chunks={v.chunks} ready={!!full && v.pending === 0} />
+              </>
             )}
 
             {v.phase === "stopped" && v.meta.mode === "practice" && (
