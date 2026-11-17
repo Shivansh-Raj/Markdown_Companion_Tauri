@@ -3,7 +3,7 @@ import { api } from "../../services/api";
 import { MarkdownRenderer } from "../MarkdownRenderer/MarkdownRenderer";
 import { streamChat } from "../../services/ai";
 import {
-  buildAskSystemPrompt, buildAskUserPrompt, isNotFound, limitDoc, parseAskAnswer, sourcesToShow, type ParsedAnswer, type Turn,
+  buildAskSystemPrompt, buildAskUserPrompt, isNotFound, limitDoc, parseAskAnswer, type ParsedAnswer, type Turn,
 } from "../../services/aiAsk";
 
 /** Answers are Markdown (lists, bold, code): render them instead of showing raw characters. */
@@ -105,16 +105,13 @@ export function AskPanel({ content, fileName, onClose }: { content: string; file
               <span className="voice-tag">FILE SAYS</span>
               {it.error ? <p>{it.answer}</p> : <Answer text={it.answer} />}
             </div>
-            {!it.error && !isNotFound(it.answer) && (() => {
-              const { extra, verifiedCount } = sourcesToShow(it.answer, it.sources);
-              if (verifiedCount === 0) return <p className="note">No exact quote could be matched in the file, so double-check this answer.</p>;
-              if (!extra.length) return <p className="note">✓ Wording checked against the file.</p>;
-              return (
-                <ul className="ask-src" aria-label="More quotes from the file">
-                  {extra.map((q) => <li key={q}>“{q}”</li>)}
+            {!it.error && !isNotFound(it.answer) && (
+              it.sources.some((s) => s.verified) ? (
+                <ul className="ask-src" aria-label="Quotes from the file">
+                  {it.sources.filter((s) => s.verified).map((s) => <li key={s.quote}>“{s.quote}”</li>)}
                 </ul>
-              );
-            })()}
+              ) : <p className="note">No exact quote could be matched in the file, so double-check this answer.</p>
+            )}
           </div>
         ))}
         {live !== null && (
