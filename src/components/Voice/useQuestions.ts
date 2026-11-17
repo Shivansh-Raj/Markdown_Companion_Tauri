@@ -35,44 +35,54 @@ export function useQuestions(opts: { active: boolean; paused: boolean; chunks: T
     if (on) { lastAt.current = Date.now() - 30_000; } // first suggestions shortly after enabling
   }, []);
 
+  /** One suggestion round. `force` skips the timing rules (used by RETHINK) but never runs two at once. */
+  const generate = useCallback(async (rethink: boolean) => {
+    const o = latest.current;
+    const text = transcriptText(o.chunks);
+    if (inFlight.current || !wordCount(text)) return;
+    inFlight.current = true;
+    setThinking(true);
+    lastAt.current = Date.now();
+    lastWords.current = wordCount(text);
+    try {
+      const key = await api.getGroqKey();
+      if (!key) return;
+      const raw = await streamChat({
+        apiKey: key, system: buildQuestionSystemPrompt(), user: buildQuestionUserPrompt(recentContext(text), asked.current, rethink),
+        signal: new AbortController().signal, onText: () => {},
+      });
+      const fresh = parseQuestions(raw, asked.current);
+      if (fresh.length) {
+        asked.current = [...asked.current, ...fresh.map((f) => f.question)].slice(-30);
+        const next = fresh.map((f) => ({ ...f, id: ++seq.current }));
+        setIdeas((cur) => (rethink ? next : [...next, ...cur]).slice(0, 6));
+      } else if (rethink) {
+        setIdeas([]);
+      }
+    } catch {
+      /* suggestions are a bonus: never disturb the recording */
+    } finally {
+      inFlight.current = false;
+      setThinking(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!opts.active) { setIdeas([]); asked.current = []; lastAt.current = 0; lastWords.current = 0; return; }
-    const timer = setInterval(async () => {
+    const timer = setInterval(() => {
       const o = latest.current;
-      const text = transcriptText(o.chunks);
-      const words = wordCount(text);
+      const words = wordCount(transcriptText(o.chunks));
       const now = Date.now();
       if (!lastAt.current) lastAt.current = now;
-      if (!shouldSuggest({
+      if (shouldSuggest({
         enabled: enabledRef.current, paused: o.paused, inFlight: inFlight.current, transcribing: o.transcribing,
         sinceMs: now - lastAt.current, newWords: words - lastWords.current,
-      })) return;
-      inFlight.current = true;
-      setThinking(true);
-      lastAt.current = now;
-      lastWords.current = words;
-      try {
-        const key = await api.getGroqKey();
-        if (!key) return;
-        const raw = await streamChat({
-          apiKey: key, system: buildQuestionSystemPrompt(), user: buildQuestionUserPrompt(recentContext(text), asked.current),
-          signal: new AbortController().signal, onText: () => {},
-        });
-        const fresh = parseQuestions(raw, asked.current);
-        if (fresh.length) {
-          asked.current = [...asked.current, ...fresh.map((f) => f.question)].slice(-30);
-          setIdeas((cur) => [...fresh.map((f) => ({ ...f, id: ++seq.current })), ...cur].slice(0, 6));
-        }
-      } catch {
-        /* suggestions are a bonus: never disturb the recording */
-      } finally {
-        inFlight.current = false;
-        setThinking(false);
-      }
+      })) void generate(false);
     }, 5000);
     return () => clearInterval(timer);
-  }, [opts.active]);
+  }, [opts.active, generate]);
 
   const dismiss = useCallback((id: number) => setIdeas((cur) => cur.filter((i) => i.id !== id)), []);
-  return { enabled, setEnabled, ideas, thinking, dismiss };
+  const rethink = useCallback(() => void generate(true), [generate]);
+  return { enabled, setEnabled, ideas, thinking, dismiss, rethink };
 }

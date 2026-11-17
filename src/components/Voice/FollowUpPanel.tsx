@@ -46,7 +46,7 @@ export function FollowUpPanel({ meta, chunks, ready }: { meta: SessionMeta; chun
     return () => { alive = false; abort.current?.abort(); };
   }, [meta.id]);
 
-  const run = async () => {
+  const run = async (rethink = false) => {
     setError(null);
     const ctl = new AbortController();
     abort.current = ctl;
@@ -88,7 +88,7 @@ export function FollowUpPanel({ meta, chunks, ready }: { meta: SessionMeta; chun
       let dropped = 0;
       if (open.length) {
         setStatus("Comparing with this meeting…");
-        const raw = await streamChat({ apiKey, system: buildFollowUpSystemPrompt(), user: buildFollowUpUserPrompt(open, plain), signal: ctl.signal, onText: () => {} });
+        const raw = await streamChat({ apiKey, system: buildFollowUpSystemPrompt(), user: buildFollowUpUserPrompt(open, plain, rethink), signal: ctl.signal, onText: () => {} });
         const parsed = toFollowUps(raw, open, plain);
         dropped += parsed.dropped;
         results = results.map((r) => parsed.results.find((p) => p.id === r.id) ?? r);
@@ -97,7 +97,7 @@ export function FollowUpPanel({ meta, chunks, ready }: { meta: SessionMeta; chun
       if (summaries.length) {
         setStatus("Looking for topics that keep coming up…");
         try {
-          const raw = await streamChat({ apiKey, system: buildTopicsSystemPrompt(), user: buildTopicsUserPrompt(summaries, plain), signal: ctl.signal, onText: () => {} });
+          const raw = await streamChat({ apiKey, system: buildTopicsSystemPrompt(), user: buildTopicsUserPrompt(summaries, plain, rethink), signal: ctl.signal, onText: () => {} });
           const t = toTopics(raw, plain);
           topics = t.topics;
           dropped += t.dropped;
@@ -127,6 +127,9 @@ export function FollowUpPanel({ meta, chunks, ready }: { meta: SessionMeta; chun
         {status
           ? <button className="btn" onClick={() => abort.current?.abort()}>STOP</button>
           : <button className="btn" disabled={!ready} onClick={() => void run()}>{report ? "CHECK AGAIN" : "CHECK PREVIOUS MEETINGS"}</button>}
+        {report && !status && (
+          <button className="btn" onClick={() => void run(true)} title="Not satisfied? Ask the AI to reconsider more strictly">↻ RETHINK</button>
+        )}
         {report && !status && <button className="btn" onClick={() => setExporting(true)}>EXPORT AS MARKDOWN…</button>}
         {status && <span className="note">{status}</span>}
       </div>

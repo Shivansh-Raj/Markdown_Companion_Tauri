@@ -88,11 +88,14 @@ export function buildFollowUpSystemPrompt(): string {
   );
 }
 
-export function buildFollowUpUserPrompt(items: PriorItem[], transcript: string): string {
+const RETHINK = "The user was not satisfied with the previous answer. Re-read the transcript carefully and reconsider each point, " +
+  "this time being stricter about evidence.\n\n";
+
+export function buildFollowUpUserPrompt(items: PriorItem[], transcript: string, rethink = false): string {
   const list = items
     .map((i) => `- id=${i.id} | task: ${i.task} | owner: ${i.owner ?? "not stated"} | due: ${i.deadline ?? "not stated"} | from: ${i.meetingTitle} (${i.meetingDate})`)
     .join("\n");
-  return `Earlier action items:\n${list}\n\nNew meeting transcript:\n"""\n${transcript}\n"""`;
+  return `${rethink ? RETHINK : ""}Earlier action items:\n${list}\n\nNew meeting transcript:\n"""\n${transcript}\n"""`;
 }
 
 const STATUSES: FollowStatus[] = ["resolved", "discussed_open", "delayed", "not_mentioned"];
@@ -131,9 +134,9 @@ export function buildTopicsSystemPrompt(): string {
   );
 }
 
-export function buildTopicsUserPrompt(summaries: { title: string; date: string; markdown: string }[], transcript: string): string {
+export function buildTopicsUserPrompt(summaries: { title: string; date: string; markdown: string }[], transcript: string, rethink = false): string {
   const prior = summaries.map((s) => `### ${s.title} (${s.date})\n${s.markdown}`).join("\n\n");
-  return `Earlier meetings:\n${prior}\n\nNew meeting transcript:\n"""\n${transcript}\n"""`;
+  return `${rethink ? RETHINK : ""}Earlier meetings:\n${prior}\n\nNew meeting transcript:\n"""\n${transcript}\n"""`;
 }
 
 export function toTopics(raw: string, transcript: string): { topics: RecurringTopic[]; dropped: number } {
@@ -213,9 +216,10 @@ export function buildQuestionSystemPrompt(): string {
   );
 }
 
-export function buildQuestionUserPrompt(recent: string, already: string[]): string {
+export function buildQuestionUserPrompt(recent: string, already: string[], rethink = false): string {
   const prev = already.length ? `Already suggested (do not repeat):\n${already.map((q) => `- ${q}`).join("\n")}\n\n` : "";
-  return `${prev}Most recent transcript:\n"""\n${recent}\n"""`;
+  const again = rethink ? "The user was not satisfied with those suggestions. Think again and offer questions from different angles.\n\n" : "";
+  return `${again}${prev}Most recent transcript:\n"""\n${recent}\n"""`;
 }
 
 const KINDS: QuestionKind[] = ["clarify", "owner", "deadline", "assumption", "risk", "dependency", "unresolved"];

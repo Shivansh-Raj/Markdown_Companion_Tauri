@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildQuestionSystemPrompt, followUpMarkdown, matchCheckboxState, parseCheckboxes, parseQuestions, recentContext, shouldSuggest,
+  buildFollowUpUserPrompt, buildQuestionSystemPrompt, buildQuestionUserPrompt, followUpMarkdown, matchCheckboxState, parseCheckboxes, parseQuestions, recentContext, shouldSuggest,
   toFollowUps, toTopics, type PriorItem,
 } from "./followups";
 
@@ -96,6 +96,14 @@ describe("live question suggestions", () => {
     expect(out[1].kind).toBe("clarify");
     expect(parseQuestions("sorry, no", [])).toEqual([]);
     expect(parseQuestions('[{"question":"When is the launch?"}]', ["when is the launch"])).toEqual([]);
+  });
+
+  it("asks for different angles when rethinking, and never repeats earlier questions", () => {
+    expect(buildQuestionUserPrompt("text", ["Who owns it?"], true)).toMatch(/not satisfied[\s\S]*different angles/);
+    expect(buildQuestionUserPrompt("text", ["Who owns it?"], true)).toContain("- Who owns it?");
+    expect(buildQuestionUserPrompt("text", [])).not.toMatch(/not satisfied/);
+    expect(buildFollowUpUserPrompt([item("a", "Send report")], "t", true)).toMatch(/stricter about evidence/);
+    expect(buildFollowUpUserPrompt([item("a", "Send report")], "t")).not.toMatch(/stricter/);
   });
 
   it("limits context to the recent tail and tells the model not to over-suggest", () => {

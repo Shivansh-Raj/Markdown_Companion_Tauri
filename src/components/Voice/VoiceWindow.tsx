@@ -259,6 +259,12 @@ export function VoiceWindow() {
                   <input type="checkbox" checked={q.enabled} onChange={(e) => q.setEnabled(e.target.checked)} /> Suggest questions I could ask
                   {q.enabled && q.thinking && <span className="note"> · thinking…</span>}
                 </label>
+                {q.enabled && (
+                  <div className="voice-actions">
+                    <button className="btn" disabled={q.thinking || v.pending > 0 || v.phase === "paused"} onClick={q.rethink}
+                      title="Not what you wanted? Get different suggestions">↻ RETHINK</button>
+                  </div>
+                )}
                 {q.enabled && q.ideas.map((i) => (
                   <div key={i.id} className="voice-idea">
                     <span className="voice-tag">{i.kind.toUpperCase()}</span> {i.question}
