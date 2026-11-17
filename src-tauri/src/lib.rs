@@ -3,6 +3,7 @@ mod external;
 mod filesystem;
 mod store;
 mod watcher;
+mod voice;
 mod windows;
 
 use filesystem::{FileLocks, FileSnapshot, ToggleError};
@@ -358,6 +359,8 @@ pub fn run() {
             let store = Store::load(data_dir.join("store.json"));
             let shortcut = store.shortcut();
             app.manage(store.clone());
+            app.manage(voice::VoiceState::default());
+            voice::recover(app.handle());
             app.manage(FileLocks::default());
             app.manage(Quitting::default());
 
@@ -387,7 +390,7 @@ pub fn run() {
                     &item("quit", "Quit")?,
                 ],
             )?;
-            let mut tray = TrayIconBuilder::new().menu(&menu).on_menu_event(|app, event| match event.id.as_ref() {
+            let mut tray = TrayIconBuilder::with_id("main").menu(&menu).on_menu_event(|app, event| match event.id.as_ref() {
                 "show" => windows::show_launcher(app, "list"),
                 "settings" => windows::show_launcher(app, "settings"),
                 "show_all" => windows::show_all_trackers(app),
@@ -464,14 +467,25 @@ pub fn run() {
             set_groq_key,
             create_markdown_file,
             get_save_dir,
-            set_save_dir
+            set_save_dir,
+            voice::voice_list_devices,
+            voice::voice_start,
+            voice::voice_pause,
+            voice::voice_resume,
+            voice::voice_stop,
+            voice::voice_status,
+            voice::voice_read_chunk,
+            voice::voice_list_sessions
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| match event {
             // Keep running in the tray when the last window closes.
             RunEvent::ExitRequested { api, code, .. } if code.is_none() => api.prevent_exit(),
-            RunEvent::Exit => app.state::<Store>().flush(),
+            RunEvent::Exit => {
+                voice::shutdown(app);
+                app.state::<Store>().flush();
+            }
             _ => {}
         });
 }

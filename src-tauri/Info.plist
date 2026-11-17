@@ -5,5 +5,8 @@
   <!-- Background utility: no Dock icon, not even briefly at launch. -->
   <key>LSUIElement</key>
   <true/>
+  <!-- Voice Intelligence records from the microphone only when you press Record. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Markdown Companion records your voice only when you start a Voice Intelligence session, so it can transcribe it and turn it into notes.</string>
 </dict>
 </plist>
