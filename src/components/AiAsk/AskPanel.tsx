@@ -1,9 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../services/api";
+import { MarkdownRenderer } from "../MarkdownRenderer/MarkdownRenderer";
 import { streamChat } from "../../services/ai";
 import {
   buildAskSystemPrompt, buildAskUserPrompt, isNotFound, limitDoc, parseAskAnswer, type ParsedAnswer, type Turn,
 } from "../../services/aiAsk";
+
+/** Answers are Markdown (lists, bold, code): render them instead of showing raw characters. */
+function Answer({ text }: { text: string }) {
+  return (
+    <div className="ask-body">
+      <MarkdownRenderer source={text} busy onOpenLink={(u) => void api.openExternal(u).catch(() => {})} />
+    </div>
+  );
+}
 
 interface Item extends Turn { sources: ParsedAnswer["sources"]; error?: boolean }
 
@@ -91,7 +101,10 @@ export function AskPanel({ content, fileName, onClose }: { content: string; file
         {items.map((it, i) => (
           <div key={i} className="ask-turn">
             <p className="ask-q"><span className="voice-tag">YOU</span> {it.question}</p>
-            <p className={it.error ? "ask-a error" : "ask-a"}><span className="voice-tag">FILE SAYS</span> {it.answer}</p>
+            <div className={it.error ? "ask-a error" : "ask-a"}>
+              <span className="voice-tag">FILE SAYS</span>
+              {it.error ? <p>{it.answer}</p> : <Answer text={it.answer} />}
+            </div>
             {!it.error && !isNotFound(it.answer) && (
               it.sources.some((s) => s.verified) ? (
                 <ul className="ask-src" aria-label="Quotes from the file">
@@ -104,7 +117,10 @@ export function AskPanel({ content, fileName, onClose }: { content: string; file
         {live !== null && (
           <div className="ask-turn">
             <p className="ask-q"><span className="voice-tag">YOU</span> {asked}</p>
-            <p className="ask-a"><span className="voice-tag">FILE SAYS</span> {live || "Reading the file…"}</p>
+            <div className="ask-a">
+              <span className="voice-tag">FILE SAYS</span>
+              {live ? <Answer text={live} /> : <p>Reading the file…</p>}
+            </div>
           </div>
         )}
       </div>
