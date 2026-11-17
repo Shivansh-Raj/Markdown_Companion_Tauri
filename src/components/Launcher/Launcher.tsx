@@ -222,6 +222,9 @@ export function Launcher() {
                 <button className="btn primary" onClick={() => void addFile()}>+ ADD FILE</button>
               </span>
               <button className="btn" onClick={() => setView("ai")}>✎ NEW WITH AI</button>
+              <button className="btn" onClick={() => void api.openVoice().then(() => api.hideLauncher()).catch((e) => setError(String(e)))}>
+                ● VOICE
+              </button>
             </span>
             <span className="hint">
               ↑↓ select · Enter open · Esc close · {isMac ? "⌘" : "Ctrl+"}, settings

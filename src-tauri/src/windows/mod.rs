@@ -127,3 +127,30 @@ pub fn open_tracker(app: &AppHandle, id: &str, title: &str, saved: Option<&Windo
 pub fn is_open(app: &AppHandle, id: &str) -> bool {
     app.get_webview_window(id).is_some()
 }
+
+pub const VOICE: &str = "voice";
+
+/// Opens (or focuses) the Voice Intelligence workspace.
+pub fn open_voice(app: &AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window(VOICE) {
+        let _ = w.unminimize();
+        w.show().map_err(|e| e.to_string())?;
+        w.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    let win = WebviewWindowBuilder::new(app, VOICE, WebviewUrl::App("index.html?view=voice".into()))
+        .title("Voice Intelligence")
+        .inner_size(720.0, 600.0)
+        .min_inner_size(520.0, 420.0)
+        .center()
+        .decorations(false)
+        .resizable(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(false)
+        .build()
+        .map_err(|e| e.to_string())?;
+    win.show().map_err(|e| e.to_string())?;
+    let _ = win.set_focus();
+    Ok(())
+}

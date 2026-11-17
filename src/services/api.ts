@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { SessionMeta, VoiceDevice, VoiceMode, VoiceStatus } from "./voice/types";
 import type { DiscoveredFile, FileEntry, FileSnapshot, LauncherInfo, Settings, TrackedFile } from "../types";
 
 export const api = {
@@ -28,6 +29,20 @@ export const api = {
     invoke<TrackedFile>("create_markdown_file", { name, content }),
   getSaveDir: () => invoke<string>("get_save_dir"),
   setSaveDir: (path: string | null) => invoke<void>("set_save_dir", { path }),
+  openVoice: () => invoke<void>("open_voice"),
+  voiceDevices: () => invoke<VoiceDevice[]>("voice_list_devices"),
+  voiceStart: (title: string, mode: VoiceMode, device: string | null) =>
+    invoke<SessionMeta>("voice_start", { title, mode, device }),
+  voicePause: () => invoke<void>("voice_pause"),
+  voiceResume: () => invoke<void>("voice_resume"),
+  voiceStop: () => invoke<SessionMeta>("voice_stop"),
+  voiceStatus: () => invoke<VoiceStatus | null>("voice_status"),
+  voiceReadChunk: (sessionId: string, index: number) => invoke<ArrayBuffer>("voice_read_chunk", { sessionId, index }),
+  voiceSessions: () => invoke<SessionMeta[]>("voice_list_sessions"),
+  voiceSaveTranscript: (sessionId: string, json: string) => invoke<void>("voice_save_transcript", { sessionId, json }),
+  voiceLoadTranscript: (sessionId: string) => invoke<string | null>("voice_load_transcript", { sessionId }),
+  voiceDeleteAudio: (sessionId: string) => invoke<void>("voice_delete_audio", { sessionId }),
+  voiceDeleteSession: (sessionId: string) => invoke<void>("voice_delete_session", { sessionId }),
   hideLauncher: () => invoke<void>("hide_launcher"),
   launcherInfo: () => invoke<LauncherInfo>("launcher_info"),
 };

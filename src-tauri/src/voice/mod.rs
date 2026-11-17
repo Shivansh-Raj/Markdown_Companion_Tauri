@@ -312,6 +312,45 @@ pub fn voice_list_sessions(app: AppHandle) -> Result<Vec<SessionMeta>, String> {
     Ok(session::list(&voice_root(&app)?))
 }
 
+/// Transcripts are stored next to the audio and are never rewritten by analyses.
+#[tauri::command]
+pub fn voice_save_transcript(app: AppHandle, session_id: String, json: String) -> Result<(), String> {
+    serde_json::from_str::<serde_json::Value>(&json).map_err(|_| "Transcript is not valid JSON".to_string())?;
+    let dir = session::session_dir(&voice_root(&app)?, &session_id)?;
+    let tmp = dir.join("transcript.json.tmp");
+    std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, dir.join("transcript.json")).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn voice_load_transcript(app: AppHandle, session_id: String) -> Result<Option<String>, String> {
+    let dir = session::session_dir(&voice_root(&app)?, &session_id)?;
+    match std::fs::read_to_string(dir.join("transcript.json")) {
+        Ok(s) => Ok(Some(s)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Deletes the recording and its chunks but keeps the transcript and notes (retention control).
+#[tauri::command]
+pub fn voice_delete_audio(app: AppHandle, session_id: String) -> Result<(), String> {
+    let dir = session::session_dir(&voice_root(&app)?, &session_id)?;
+    let _ = std::fs::remove_file(dir.join("audio.wav"));
+    let _ = std::fs::remove_dir_all(dir.join("chunks"));
+    Ok(())
+}
+
+/// Deletes a whole session (audio, transcript and metadata). Refuses the one being recorded.
+#[tauri::command]
+pub fn voice_delete_session(app: AppHandle, state: State<VoiceState>, session_id: String) -> Result<(), String> {
+    if state.0.lock().map(|s| s.as_ref().is_some_and(|a| a.meta.id == session_id)).unwrap_or(false) {
+        return Err("Stop the recording before deleting it.".into());
+    }
+    let dir = session::session_dir(&voice_root(&app)?, &session_id)?;
+    std::fs::remove_dir_all(dir).map_err(|e| e.to_string())
+}
+
 /// Called once at startup: repairs recordings that were interrupted by a crash or force-quit.
 pub fn recover(app: &AppHandle) {
     if let Ok(root) = voice_root(app) {

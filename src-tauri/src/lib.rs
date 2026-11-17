@@ -251,6 +251,11 @@ mod ai_tests {
 // ---- launcher, settings, shortcut ----
 
 #[tauri::command]
+fn open_voice(app: AppHandle) -> Result<(), String> {
+    windows::open_voice(&app)
+}
+
+#[tauri::command]
 fn hide_launcher(app: AppHandle) {
     if let Some(w) = app.get_webview_window(windows::LAUNCHER) {
         let _ = w.hide();
@@ -385,6 +390,7 @@ pub fn run() {
                     &item("show", "Open launcher")?,
                     &item("show_all", "Show all trackers")?,
                     &item("hide_all", "Hide all trackers")?,
+                    &item("voice", "Voice Intelligence…")?,
                     &item("settings", "Settings…")?,
                     &PredefinedMenuItem::separator(app)?,
                     &item("quit", "Quit")?,
@@ -393,6 +399,9 @@ pub fn run() {
             let mut tray = TrayIconBuilder::with_id("main").menu(&menu).on_menu_event(|app, event| match event.id.as_ref() {
                 "show" => windows::show_launcher(app, "list"),
                 "settings" => windows::show_launcher(app, "settings"),
+                "voice" => {
+                    let _ = windows::open_voice(app);
+                }
                 "show_all" => windows::show_all_trackers(app),
                 "hide_all" => windows::hide_all_trackers(app),
                 "quit" => {
@@ -454,6 +463,7 @@ pub fn run() {
             save_tracker_content,
             tracker_info,
             hide_launcher,
+            open_voice,
             open_external,
             launcher_info,
             get_settings,
@@ -475,7 +485,11 @@ pub fn run() {
             voice::voice_stop,
             voice::voice_status,
             voice::voice_read_chunk,
-            voice::voice_list_sessions
+            voice::voice_list_sessions,
+            voice::voice_save_transcript,
+            voice::voice_load_transcript,
+            voice::voice_delete_audio,
+            voice::voice_delete_session
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

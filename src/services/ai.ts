@@ -10,7 +10,7 @@ export const DOC_TYPE_LABELS: Record<DocTypeChoice, string> = {
   notes: "Notes",
 };
 
-const API = "https://api.groq.com/openai/v1";
+export const API = "https://api.groq.com/openai/v1";
 const ENDPOINT = `${API}/chat/completions`;
 
 /** Best first. Matched against the models the user's key can actually use. */
@@ -27,7 +27,7 @@ export function pickModel(ids: string[]): string | null {
 }
 
 /** fetch that turns network failures into a readable message. */
-async function groqFetch(url: string, init: RequestInit): Promise<Response> {
+export async function groqFetch(url: string, init: RequestInit): Promise<Response> {
   try {
     return await fetch(url, init);
   } catch (e) {
