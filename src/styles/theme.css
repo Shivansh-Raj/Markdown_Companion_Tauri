@@ -275,3 +275,17 @@ html[data-anim="on"] .rec-pill:not(.paused) { animation: rec-blink 1.2s steps(1)
 .voice-result-head strong { flex: 1; color: var(--accent); }
 .voice-preview { width: 100%; min-height: 140px; resize: vertical; box-sizing: border-box; padding: 8px; background: var(--code-bg); color: var(--ink);
   border: 2px solid var(--border); font: 12px/1.4 ui-monospace, monospace; }
+.voice-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.stat { display: flex; flex-direction: column; gap: 2px; padding: 8px; background: var(--surface); border: 2px solid var(--border); box-shadow: 2px 2px 0 var(--shadow); }
+.stat b { font-family: var(--pixel); font-size: 20px; color: var(--accent); }
+.stat span { font-size: 11px; color: var(--muted); }
+.pace-bars { display: flex; align-items: flex-end; gap: 3px; height: 54px; padding: 4px; background: var(--code-bg); border: 2px solid var(--border); }
+.pace-bars i { flex: 1; min-width: 4px; max-width: 28px; background: var(--muted); }
+.pace-bars i.flag { background: var(--accent); }
+.voice-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; font-size: 12px; }
+.voice-list { margin: 4px 0; padding-left: 18px; font-size: 12px; line-height: 1.5; }
+.voice-fix { display: flex; flex-direction: column; gap: 6px; padding: 8px; background: var(--surface); border: 2px solid var(--border); }
+.voice-fix p { margin: 0; font-size: 13px; line-height: 1.45; }
+.voice-styles { display: flex; gap: 6px; flex-wrap: wrap; }
+.voice-tag { font-family: var(--pixel); font-size: 9px; padding: 1px 4px; margin-right: 4px; background: var(--inline-bg); border: 1px solid var(--border); }
+.voice-better { color: var(--ink); }

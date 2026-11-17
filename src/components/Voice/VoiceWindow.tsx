@@ -7,6 +7,7 @@ import {
 } from "../../services/voice/transcript";
 import { MODE_LABELS, type SessionMeta, type VoiceDevice, type VoiceMode } from "../../services/voice/types";
 import { AnalysisPanel } from "./AnalysisPanel";
+import { PracticePanel } from "./PracticePanel";
 import { useVoiceSession } from "./useVoiceSession";
 
 const CONSENT_KEY = "voice-cloud-consent";
@@ -19,7 +20,7 @@ const writeConsent = () => {
 
 const MODE_HINT: Record<VoiceMode, string> = {
   meeting: "Capture a meeting or call, then get a summary, key takeaways and action items.",
-  practice: "Rehearse a talk. The speaking coach arrives in the next update.",
+  practice: "Rehearse a talk and get pace, filler and pause stats plus coaching on your wording.",
   note: "Say it out loud; get a tidy Markdown note.",
 };
 
@@ -241,6 +242,10 @@ export function VoiceWindow() {
 
             {v.phase === "stopped" && v.meta.mode === "meeting" && (
               <AnalysisPanel meta={v.meta} chunks={v.chunks} ready={!!full && v.pending === 0} />
+            )}
+
+            {v.phase === "stopped" && v.meta.mode === "practice" && (
+              <PracticePanel meta={v.meta} chunks={v.chunks} ready={!!full && v.pending === 0} />
             )}
 
             {(note || noting) && (

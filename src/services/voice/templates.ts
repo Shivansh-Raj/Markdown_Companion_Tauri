@@ -12,30 +12,59 @@ function header(meta: SessionMeta, title: string): string {
   ].join("\n");
 }
 
-function truncatedNote(r: AnalysisResult): string {
-  return r.truncated ? "\n> Note: the recording was very long, so only the first part was analysed.\n" : "";
+/** One exportable block of Markdown (an analysis, a report, ...). */
+export interface Section {
+  id: string;
+  label: string;
+  /** Used in suggested file names, e.g. "summary" -> "2026-11-17 Sprint review summary". */
+  suffix: string;
+  markdown: string;
+  note?: string;
 }
 
-/** One analysis as a stand-alone document. */
-export function standaloneMarkdown(meta: SessionMeta, r: AnalysisResult): string {
-  return `${header(meta, ANALYSIS_LABELS[r.type])}${r.markdown.trim()}\n${truncatedNote(r)}`;
+function noteOf(s: Section): string {
+  return s.note ? `\n> Note: ${s.note}\n` : "";
 }
 
-/** Several analyses as one document, in a fixed order. */
-export function combinedMarkdown(meta: SessionMeta, results: AnalysisResult[]): string {
-  const ordered = ANALYSIS_TYPES.map((t) => results.find((r) => r.type === t)).filter((r): r is AnalysisResult => !!r);
-  const body = ordered.map((r) => `## ${ANALYSIS_LABELS[r.type]}\n\n${r.markdown.trim()}\n${truncatedNote(r)}`).join("\n");
-  return `${header(meta, "meeting notes")}${body}`;
+/** One section as a stand-alone document. */
+export function standaloneFromSection(meta: SessionMeta, s: Section): string {
+  return `${header(meta, s.label)}${s.markdown.trim()}\n${noteOf(s)}`;
+}
+
+/** Several sections as one document, in the order given. */
+export function combinedFromSections(meta: SessionMeta, docTitle: string, sections: Section[]): string {
+  return `${header(meta, docTitle)}${sections.map((s) => `## ${s.label}\n\n${s.markdown.trim()}\n${noteOf(s)}`).join("\n")}`;
 }
 
 /**
  * Text appended to an existing file. Existing content is never touched, so completed checkboxes and everything
  * else stay exactly as they are; the new block just goes at the end under its own heading.
  */
+export function appendFromSections(meta: SessionMeta, sections: Section[]): string {
+  const body = sections.map((s) => `### ${s.label}\n\n${s.markdown.trim()}\n${noteOf(s)}`).join("\n");
+  return `## ${meta.title.trim() || "Recording"} (${dateStamp(meta.createdAtMs)})\n\n${body}`;
+}
+
+const TRUNCATED = "the recording was very long, so only the first part was analysed.";
+
+export function meetingSections(results: AnalysisResult[]): Section[] {
+  return ANALYSIS_TYPES.map((t) => results.find((r) => r.type === t))
+    .filter((r): r is AnalysisResult => !!r)
+    .map((r) => ({ id: r.type, label: ANALYSIS_LABELS[r.type], suffix: typeFileSuffix(r.type), markdown: r.markdown, note: r.truncated ? TRUNCATED : undefined }));
+}
+
+/** One analysis as a stand-alone document. */
+export function standaloneMarkdown(meta: SessionMeta, r: AnalysisResult): string {
+  return standaloneFromSection(meta, meetingSections([r])[0]);
+}
+
+/** Several analyses as one document, in a fixed order. */
+export function combinedMarkdown(meta: SessionMeta, results: AnalysisResult[]): string {
+  return combinedFromSections(meta, "meeting notes", meetingSections(results));
+}
+
 export function appendBlock(meta: SessionMeta, results: AnalysisResult[]): string {
-  const ordered = ANALYSIS_TYPES.map((t) => results.find((r) => r.type === t)).filter((r): r is AnalysisResult => !!r);
-  const body = ordered.map((r) => `### ${ANALYSIS_LABELS[r.type]}\n\n${r.markdown.trim()}\n${truncatedNote(r)}`).join("\n");
-  return `## ${meta.title.trim() || "Meeting"} (${dateStamp(meta.createdAtMs)})\n\n${body}`;
+  return appendFromSections(meta, meetingSections(results));
 }
 
 export function appendToContent(existing: string, block: string): string {
