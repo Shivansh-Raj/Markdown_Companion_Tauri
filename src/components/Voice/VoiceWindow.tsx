@@ -6,6 +6,7 @@ import {
   buildNoteSystemPrompt, buildNoteUserPrompt, formatClock, suggestFileName, transcriptMarkdown, transcriptText, wordCount,
 } from "../../services/voice/transcript";
 import { MODE_LABELS, type SessionMeta, type VoiceDevice, type VoiceMode } from "../../services/voice/types";
+import { AnalysisPanel } from "./AnalysisPanel";
 import { useVoiceSession } from "./useVoiceSession";
 
 const CONSENT_KEY = "voice-cloud-consent";
@@ -17,7 +18,7 @@ const writeConsent = () => {
 };
 
 const MODE_HINT: Record<VoiceMode, string> = {
-  meeting: "Capture a meeting or call. Summary, takeaways and action items arrive in the next update.",
+  meeting: "Capture a meeting or call, then get a summary, key takeaways and action items.",
   practice: "Rehearse a talk. The speaking coach arrives in the next update.",
   note: "Say it out loud; get a tidy Markdown note.",
 };
@@ -236,6 +237,10 @@ export function VoiceWindow() {
                 <button className="btn" onClick={() => void confirmDelete("audio")}>{armed === "audio" ? "SURE? DELETE AUDIO" : "DELETE AUDIO"}</button>
                 <button className="btn" onClick={() => void confirmDelete("session")}>{armed === "session" ? "SURE? DELETE ALL" : "DELETE SESSION"}</button>
               </div>
+            )}
+
+            {v.phase === "stopped" && v.meta.mode === "meeting" && (
+              <AnalysisPanel meta={v.meta} chunks={v.chunks} ready={!!full && v.pending === 0} />
             )}
 
             {(note || noting) && (

@@ -41,6 +41,11 @@ export const api = {
   voiceSessions: () => invoke<SessionMeta[]>("voice_list_sessions"),
   voiceSaveTranscript: (sessionId: string, json: string) => invoke<void>("voice_save_transcript", { sessionId, json }),
   voiceLoadTranscript: (sessionId: string) => invoke<string | null>("voice_load_transcript", { sessionId }),
+  voiceSaveAnalysis: (sessionId: string, kind: string, json: string) =>
+    invoke<void>("voice_save_analysis", { sessionId, kind, json }),
+  voiceListAnalyses: (sessionId: string) => invoke<string[]>("voice_list_analyses", { sessionId }),
+  createMarkdownFileIn: (dir: string, name: string, content: string) =>
+    invoke<TrackedFile>("create_markdown_file_in", { dir, name, content }),
   voiceDeleteAudio: (sessionId: string) => invoke<void>("voice_delete_audio", { sessionId }),
   voiceDeleteSession: (sessionId: string) => invoke<void>("voice_delete_session", { sessionId }),
   hideLauncher: () => invoke<void>("hide_launcher"),

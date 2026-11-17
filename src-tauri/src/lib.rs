@@ -215,12 +215,10 @@ fn set_save_dir(path: Option<String>, store: State<Store>) -> Result<(), String>
     store.set_ai_save_dir(path.as_deref())
 }
 
-/// Writes generated Markdown to the save folder as `<name>.md` (never overwriting) and registers it.
-#[tauri::command(async)]
-fn create_markdown_file(app: AppHandle, name: String, content: String, store: State<Store>) -> Result<TrackedFile, String> {
-    let dir = save_dir(&app, &store)?;
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let stem = safe_stem(&name);
+/// Creates `<dir>/<name>.md` without ever overwriting an existing file, and registers it.
+fn write_new_markdown(dir: &std::path::Path, name: &str, content: &str, store: &Store) -> Result<TrackedFile, String> {
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let stem = safe_stem(name);
     for n in 0..1000u32 {
         let file = if n == 0 { format!("{stem}.md") } else { format!("{stem}-{n}.md") };
         let path = dir.join(file);
@@ -235,6 +233,23 @@ fn create_markdown_file(app: AppHandle, name: String, content: String, store: St
         }
     }
     Err("Could not find a free file name".into())
+}
+
+/// Writes generated Markdown to the save folder as `<name>.md` (never overwriting) and registers it.
+#[tauri::command(async)]
+fn create_markdown_file(app: AppHandle, name: String, content: String, store: State<Store>) -> Result<TrackedFile, String> {
+    let dir = save_dir(&app, &store)?;
+    write_new_markdown(&dir, &name, &content, &store)
+}
+
+/// Same as `create_markdown_file`, but into a folder chosen for this one export.
+#[tauri::command(async)]
+fn create_markdown_file_in(dir: String, name: String, content: String, store: State<Store>) -> Result<TrackedFile, String> {
+    let dir = std::path::PathBuf::from(dir);
+    if !dir.is_absolute() {
+        return Err("Choose a folder.".into());
+    }
+    write_new_markdown(&dir, &name, &content, &store)
 }
 
 #[cfg(test)]
@@ -476,6 +491,7 @@ pub fn run() {
             get_groq_key,
             set_groq_key,
             create_markdown_file,
+            create_markdown_file_in,
             get_save_dir,
             set_save_dir,
             voice::voice_list_devices,
@@ -487,6 +503,8 @@ pub fn run() {
             voice::voice_read_chunk,
             voice::voice_list_sessions,
             voice::voice_save_transcript,
+            voice::voice_save_analysis,
+            voice::voice_list_analyses,
             voice::voice_load_transcript,
             voice::voice_delete_audio,
             voice::voice_delete_session

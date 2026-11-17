@@ -332,6 +332,35 @@ pub fn voice_load_transcript(app: AppHandle, session_id: String) -> Result<Optio
     }
 }
 
+fn valid_kind(kind: &str) -> bool {
+    !kind.is_empty() && kind.len() <= 24 && kind.chars().all(|c| c.is_ascii_lowercase() || c == '-')
+}
+
+/// Saves one analysis result as `analyses/<kind>-<time>.json`. Older results are kept (never overwritten),
+/// so any analysis can be regenerated from the transcript without losing earlier versions.
+#[tauri::command]
+pub fn voice_save_analysis(app: AppHandle, session_id: String, kind: String, json: String) -> Result<(), String> {
+    if !valid_kind(&kind) {
+        return Err("Invalid analysis type".into());
+    }
+    serde_json::from_str::<serde_json::Value>(&json).map_err(|_| "Analysis is not valid JSON".to_string())?;
+    let dir = session::session_dir(&voice_root(&app)?, &session_id)?.join("analyses");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("{kind}-{}.json", now_ms()));
+    std::fs::write(path, json).map_err(|e| e.to_string())
+}
+
+/// All saved analyses of a session as JSON strings, oldest first.
+#[tauri::command]
+pub fn voice_list_analyses(app: AppHandle, session_id: String) -> Result<Vec<String>, String> {
+    let dir = session::session_dir(&voice_root(&app)?, &session_id)?.join("analyses");
+    let mut names: Vec<_> = std::fs::read_dir(&dir)
+        .map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "json")).collect())
+        .unwrap_or_default();
+    names.sort();
+    Ok(names.iter().filter_map(|p| std::fs::read_to_string(p).ok()).collect())
+}
+
 /// Deletes the recording and its chunks but keeps the transcript and notes (retention control).
 #[tauri::command]
 pub fn voice_delete_audio(app: AppHandle, session_id: String) -> Result<(), String> {
