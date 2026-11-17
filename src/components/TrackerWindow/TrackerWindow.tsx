@@ -14,6 +14,7 @@ import {
 import { MarkdownRenderer } from "../MarkdownRenderer/MarkdownRenderer";
 import { ProgressBar } from "../ProgressBar/ProgressBar";
 import { AiEditPanel } from "../AiEdit/AiEditPanel";
+import { AskPanel } from "../AiAsk/AskPanel";
 import { locateSelection } from "../../services/aiEdit";
 import type { FileSnapshot, FileStatus, SyncEvent, TrackedFile } from "../../types";
 
@@ -36,6 +37,7 @@ export function TrackerWindow({ id }: { id: string }) {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   // AI edit: results land in the edit draft (never straight on disk); `aiUndo` holds earlier drafts.
   const [aiOpen, setAiOpen] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
   const [aiUndo, setAiUndo] = useState<string[]>([]);
   const [aiSelection, setAiSelection] = useState<{ start: number; end: number } | null>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
@@ -243,13 +245,14 @@ export function TrackerWindow({ id }: { id: string }) {
       <div className="titlebar" data-tauri-drag-region>
         <span className="title" data-tauri-drag-region>{info?.display_name ?? "…"}</span>
         <button className="btn" onClick={openAi} onMouseDown={(e) => e.preventDefault()} disabled={!snap || unavailable || busy || aiOpen} aria-label="Edit with AI">AI</button>
+        <button className="btn" onClick={() => setAskOpen(true)} disabled={!snap || askOpen || aiOpen} aria-label="Ask AI about this file" title="Ask a question about this file">ASK</button>
         {!editing && (
           <button className="btn" onClick={startEdit} disabled={!snap || unavailable} aria-label="Edit Markdown source">EDIT</button>
         )}
         <button className="btn" onClick={() => void win.hide()} aria-label="Hide tracker">–</button>
         <button className="btn" onClick={() => void win.close()} aria-label="Close tracker">✕</button>
       </div>
-      {!editing && !aiOpen && doc && doc.total > 0 && <ProgressBar done={doc.done} total={doc.total} />}
+      {!editing && !aiOpen && !askOpen && doc && doc.total > 0 && <ProgressBar done={doc.done} total={doc.total} />}
       {unavailable && (
         <div className="error" role="alert">
           {status.kind === "missing"
@@ -264,7 +267,7 @@ export function TrackerWindow({ id }: { id: string }) {
           <button className="btn" onClick={() => setNotice(null)} aria-label="Dismiss">✕</button>
         </div>
       )}
-      {editing && !aiOpen && (
+      {editing && !aiOpen && !askOpen && (
         <div className="editbar">
           <button className="btn primary" onClick={() => void saveEdit()} disabled={busy}>SAVE</button>
           <button className="btn" onClick={cancelEdit} disabled={busy}>{confirmDiscard ? "DISCARD?" : "CANCEL"}</button>
@@ -272,7 +275,9 @@ export function TrackerWindow({ id }: { id: string }) {
           <span className="hint">Cmd/Ctrl+S saves</span>
         </div>
       )}
-      {aiOpen && snap ? (
+      {askOpen && snap ? (
+        <AskPanel content={draft ?? snap.content} fileName={info?.display_name ?? "this file"} onClose={() => setAskOpen(false)} />
+      ) : aiOpen && snap ? (
         <AiEditPanel
           content={draft ?? snap.content}
           currentHash={snap.hash}
