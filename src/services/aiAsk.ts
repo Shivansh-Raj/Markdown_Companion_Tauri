@@ -16,7 +16,7 @@ export function buildAskSystemPrompt(): string {
     `If the document does not contain the answer, reply exactly: ${NOT_FOUND} Never use outside knowledge, never guess, and never invent details. ` +
     "Keep the answer short and direct, in the language of the question. Plain text or simple Markdown lists are fine. " +
     "After the answer, add a line 'SOURCES:' followed by up to 3 lines, each '- \"<exact quote from the document>\"', copied character for character " +
-    "from the document. If you answered that it was not found, omit SOURCES."
+    "from the document. Only list a quote if your answer does not already contain those words. If you answered that it was not found, omit SOURCES."
   );
 }
 
@@ -52,4 +52,16 @@ export function parseAskAnswer(raw: string, doc: string): ParsedAnswer {
 
 export function isNotFound(answer: string): boolean {
   return answer.trim().toLowerCase().startsWith("i couldn't find that in this file");
+}
+
+const squash = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}\s']/gu, " ").replace(/\s+/g, " ").trim();
+
+/**
+ * Which source quotes to show under an answer. Quotes whose words are already in the answer are not repeated;
+ * when every verified quote was already in the answer, the UI just says the wording was checked.
+ */
+export function sourcesToShow(answer: string, sources: Source[]): { extra: string[]; verifiedCount: number } {
+  const verified = sources.filter((s) => s.verified);
+  const a = squash(answer);
+  return { extra: verified.filter((s) => !a.includes(squash(s.quote))).map((s) => s.quote), verifiedCount: verified.length };
 }

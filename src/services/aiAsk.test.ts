@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_ASK_CHARS, buildAskSystemPrompt, buildAskUserPrompt, isNotFound, limitDoc, parseAskAnswer } from "./aiAsk";
+import { MAX_ASK_CHARS, buildAskSystemPrompt, buildAskUserPrompt, isNotFound, limitDoc, parseAskAnswer, sourcesToShow } from "./aiAsk";
 
 const DOC = "# Launch plan\n\n- [x] Write the **press release**\n- [ ] Book the venue for March 14\n\nOwner: Priya";
 
@@ -39,6 +39,19 @@ describe("ask the file", () => {
   it("caps sources at three and drops duplicates", () => {
     const raw = 'A.\nSOURCES:\n- "Owner: Priya"\n- "Owner: Priya"\n- "Launch plan"\n- "press release"\n- "Book the venue"';
     expect(parseAskAnswer(raw, DOC).sources.map((s) => s.quote)).toEqual(["Owner: Priya", "Launch plan", "press release"]);
+  });
+
+  it("does not repeat quotes that are already part of the answer", () => {
+    const sources = [
+      { quote: "Book the venue for March 14", verified: true },
+      { quote: "Owner: Priya", verified: true },
+      { quote: "invented line", verified: false },
+    ];
+    // answer repeats the first quote, so only the second is worth showing
+    expect(sourcesToShow("- Book the venue for March 14.", sources)).toEqual({ extra: ["Owner: Priya"], verifiedCount: 2 });
+    // everything verified is already in the answer: nothing extra, but it counts as checked
+    expect(sourcesToShow("Book the venue for March 14. Owner: Priya.", sources)).toEqual({ extra: [], verifiedCount: 2 });
+    expect(sourcesToShow("x", [{ quote: "q", verified: false }])).toEqual({ extra: [], verifiedCount: 0 });
   });
 
   it("truncates very large files on a line boundary and says so", () => {
