@@ -129,6 +129,32 @@ pub fn is_open(app: &AppHandle, id: &str) -> bool {
 }
 
 pub const VOICE: &str = "voice";
+pub const TASKS: &str = "tasks";
+
+/// Opens (or focuses) the open-tasks window: a small always-on-top list of unchecked tasks.
+pub fn open_tasks(app: &AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window(TASKS) {
+        let _ = w.unminimize();
+        w.show().map_err(|e| e.to_string())?;
+        w.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    let win = WebviewWindowBuilder::new(app, TASKS, WebviewUrl::App("index.html?view=tasks".into()))
+        .title("Open tasks")
+        .inner_size(380.0, 520.0)
+        .min_inner_size(280.0, 240.0)
+        .center()
+        .decorations(false)
+        .resizable(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(false)
+        .build()
+        .map_err(|e| e.to_string())?;
+    win.show().map_err(|e| e.to_string())?;
+    let _ = win.set_focus();
+    Ok(())
+}
 
 /// Opens (or focuses) the Voice Intelligence workspace.
 pub fn open_voice(app: &AppHandle) -> Result<(), String> {

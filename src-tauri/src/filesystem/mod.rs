@@ -94,6 +94,40 @@ impl FileLocks {
         Ok(FileSnapshot { hash: hash_bytes(updated.as_bytes()), content: updated })
     }
 
+    /// Toggles a task found by an index rather than by a snapshot the caller holds. Under the file lock it re-reads the
+    /// file and checks that the marker is where the index said and that the line still contains `expect` (the task
+    /// text as indexed). If the file changed in between it writes nothing and returns `Stale`. Recurring tasks
+    /// (`🔁`) are refused: completing one creates the next occurrence in Obsidian's Tasks, which a flip cannot do.
+    pub fn toggle_task_verified(&self, path: &Path, offset: usize, expect: &str, checked: bool) -> Result<FileSnapshot, ToggleError> {
+        let lock = self.lock_for(path);
+        let _guard = lock.lock().unwrap();
+
+        let meta = std::fs::metadata(path).map_err(|e| failed(format!("Cannot access file: {e}")))?;
+        if meta.permissions().readonly() {
+            return Err(failed("File is read-only"));
+        }
+        let bytes = std::fs::read(path).map_err(|e| failed(format!("Cannot read file: {e}")))?;
+        let current = snapshot_from_bytes(bytes).map_err(failed)?;
+        let stale = || ToggleError::Stale { content: current.content.clone(), hash: current.hash.clone() };
+
+        let content = &current.content;
+        if !content.is_char_boundary(offset) || content.get(offset..offset + 3).is_none() {
+            return Err(stale());
+        }
+        let line_start = content[..offset].rfind('\n').map_or(0, |i| i + 1);
+        let line_end = content[offset..].find('\n').map_or(content.len(), |i| offset + i);
+        let line = &content[line_start..line_end];
+        if expect.trim().is_empty() || !line.contains(expect.trim()) {
+            return Err(stale());
+        }
+        if line.contains('🔁') {
+            return Err(failed("This task repeats. Complete it in Obsidian so the next occurrence is created."));
+        }
+        let updated = apply_toggle(content, offset, checked).map_err(|_| stale())?;
+        write_atomic(path, updated.as_bytes(), &meta).map_err(|e| failed(format!("Cannot save file: {e}")))?;
+        Ok(FileSnapshot { hash: hash_bytes(updated.as_bytes()), content: updated })
+    }
+
     /// Replaces the whole file with `content`, only if it still matches `expected_hash`.
     /// Used by the explicit edit mode; the user's text is written exactly as given.
     pub fn save_content(&self, path: &Path, expected_hash: &str, content: &str) -> Result<FileSnapshot, ToggleError> {
@@ -262,5 +296,40 @@ mod tests {
         std::fs::set_permissions(&p, perms).unwrap();
         let err = locks.save_content(&p, &saved.hash, "x").unwrap_err();
         assert!(matches!(&err, ToggleError::Failed { message } if message.contains("read-only")));
+    }
+
+    #[test]
+    fn verified_toggle_flips_only_the_marker_and_can_be_undone() {
+        let dir = std::env::temp_dir().join(format!("mdc-vtoggle-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("n.md");
+        let md = "# T\n- [ ] first 📅 2026-12-01\n- [ ] second\n";
+        std::fs::write(&p, md).unwrap();
+        let locks = FileLocks::default();
+        let off = md.find("[ ] second").unwrap();
+        let done = locks.toggle_task_verified(&p, off, "second", true).unwrap();
+        assert_eq!(done.content, "# T\n- [ ] first 📅 2026-12-01\n- [x] second\n");
+        let back = locks.toggle_task_verified(&p, off, "second", false).unwrap();
+        assert_eq!(back.content, md);
+    }
+
+    #[test]
+    fn verified_toggle_refuses_when_the_file_moved_on_or_the_task_repeats() {
+        let dir = std::env::temp_dir().join(format!("mdc-vtoggle2-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("n.md");
+        let md = "- [ ] a 🔁 every week\n- [ ] b\n";
+        std::fs::write(&p, md).unwrap();
+        let locks = FileLocks::default();
+        // repeating task: refused with a reason, file untouched
+        let err = locks.toggle_task_verified(&p, 2, "a", true).unwrap_err();
+        assert!(matches!(err, ToggleError::Failed { ref message } if message.contains("repeats")), "{err:?}");
+        // the line at that offset is no longer the task the index saw (an edit inserted a line above)
+        std::fs::write(&p, "inserted\n- [ ] a 🔁 every week\n- [ ] b\n").unwrap();
+        let off_b = md.find("[ ] b").unwrap();
+        assert!(matches!(locks.toggle_task_verified(&p, off_b, "b", true), Err(ToggleError::Stale { .. })));
+        assert_eq!(std::fs::read_to_string(&p).unwrap(), "inserted\n- [ ] a 🔁 every week\n- [ ] b\n");
+        // out of range or not a marker
+        assert!(matches!(locks.toggle_task_verified(&p, 9999, "b", true), Err(ToggleError::Stale { .. })));
     }
 }

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { SessionMeta, VoiceDevice, VoiceMode, VoiceStatus } from "./voice/types";
-import type { DiscoveredFile, FileEntry, FileSnapshot, KeyStorage, LauncherInfo, NoteContext, Settings, TrackedFile } from "../types";
+import type { DiscoveredFile, FileEntry, FileSnapshot, KeyStorage, LauncherInfo, NoteContext, Settings, TasksView, TrackedFile } from "../types";
 
 export const api = {
   listFiles: () => invoke<FileEntry[]>("list_files"),
@@ -16,6 +16,11 @@ export const api = {
   obsidianStatus: () => invoke<{ app_installed: boolean; cli_path: string | null }>("obsidian_status"),
   noteContext: (id: string) => invoke<NoteContext | null>("note_context", { id }),
   openVaultNote: (id: string, path: string) => invoke<void>("open_vault_note", { id, path }),
+  openTasksWindow: () => invoke<void>("open_tasks_window"),
+  openTasks: () => invoke<TasksView>("open_tasks"),
+  toggleVaultTask: (path: string, offset: number, expect: string, checked: boolean) =>
+    invoke<"done" | "stale">("toggle_vault_task", { path, offset, expect, checked }),
+  openNoteByPath: (path: string) => invoke<void>("open_note_by_path", { path }),
   openWikilink: (id: string, target: string) => invoke<boolean>("open_wikilink", { id, target }),
   openInObsidian: (id: string) => invoke<void>("open_in_obsidian", { id }),
   obsidianDailyAppend: (content: string, heading?: string) =>

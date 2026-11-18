@@ -275,6 +275,156 @@ fn open_vault_note(app: AppHandle, id: String, path: String, store: State<Store>
     open_tracker_impl(&app, &file.id)
 }
 
+// ---- Open tasks ----
+
+#[derive(Serialize)]
+struct TaskRow {
+    path: String,
+    note: String,
+    rel: String,
+    source: String,
+    offset: usize,
+    line: usize,
+    title: String,
+    raw: String,
+    due: Option<String>,
+    scheduled: Option<String>,
+    recurring: bool,
+}
+
+#[derive(Serialize)]
+struct TasksView {
+    rows: Vec<TaskRow>,
+    /// Names of the vaults and folders searched.
+    sources: Vec<String>,
+    /// More tasks exist than are shown.
+    truncated: bool,
+}
+
+const MAX_TASK_ROWS: usize = 1500;
+
+/// The vault or watched-folder roots to search, plus tracked files that sit in neither.
+fn task_sources(store: &Store) -> (Vec<(std::path::PathBuf, bool)>, Vec<std::path::PathBuf>) {
+    let watched = watched_folders(store);
+    let mut roots: Vec<(std::path::PathBuf, bool)> = Vec::new();
+    let mut add = |r: (std::path::PathBuf, bool)| {
+        if !roots.iter().any(|(p, _)| *p == r.0) {
+            roots.push(r);
+        }
+    };
+    for w in &watched {
+        add(match discovery::vault_root(&w.join("_")) {
+            Some(v) => (v, true),
+            None => (w.clone(), false),
+        });
+    }
+    let mut loose = Vec::new();
+    for f in store.files() {
+        let p = std::path::PathBuf::from(&f.canonical_path);
+        match vault::index_root_for(&p, &watched) {
+            Some(r) => add(r),
+            None => loose.push(p),
+        }
+    }
+    (roots, loose)
+}
+
+/// Collects unchecked tasks from the given roots (indexed, refreshed first) and loose files (parsed directly).
+fn collect_tasks(
+    roots: Vec<(std::path::PathBuf, bool)>,
+    loose: Vec<std::path::PathBuf>,
+    indexes: &mut std::collections::HashMap<std::path::PathBuf, vault::VaultIndex>,
+) -> TasksView {
+    let mut rows: Vec<TaskRow> = Vec::new();
+    let mut seen = HashSet::new();
+    let mut sources = Vec::new();
+    let mut truncated = false;
+    let mut push = |rows: &mut Vec<TaskRow>, path: &Path, note: &str, rel: &str, source: &str, t: &vault::TaskItem| {
+        if t.done || !seen.insert((path.to_path_buf(), t.offset)) {
+            return;
+        }
+        if rows.len() >= MAX_TASK_ROWS {
+            truncated = true;
+            return;
+        }
+        rows.push(TaskRow {
+            path: path.to_string_lossy().into_owned(), note: note.into(), rel: rel.into(), source: source.into(),
+            offset: t.offset, line: t.line, title: t.title.clone(), raw: t.raw.clone(),
+            due: t.due.clone(), scheduled: t.scheduled.clone(), recurring: t.recurring,
+        });
+    };
+    for (root, is_vault) in roots {
+        let index = indexes.entry(root.clone()).or_insert_with(|| vault::VaultIndex::new(root.clone(), is_vault));
+        index.refresh();
+        let name = root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        sources.push(name.clone());
+        for n in &index.notes {
+            for t in &n.parsed.tasks {
+                push(&mut rows, &n.path, &n.name, &n.rel, &name, t);
+            }
+        }
+    }
+    for path in loose {
+        let Ok(content) = std::fs::read_to_string(&path) else { continue };
+        let name = path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        for t in &vault::parse_note(&content).tasks {
+            push(&mut rows, &path, &name, &name, "Tracked files", t);
+        }
+    }
+    TasksView { rows, sources, truncated }
+}
+
+/// Unchecked tasks from every vault, watched folder and tracked file. Read-only; refreshes the indexes first.
+#[tauri::command(async)]
+fn open_tasks(store: State<Store>, vaults: State<vault::VaultState>) -> Result<TasksView, String> {
+    let (roots, loose) = task_sources(&store);
+    let mut all = vaults.0.lock().map_err(|_| "Index is busy".to_string())?;
+    Ok(collect_tasks(roots, loose, &mut all))
+}
+
+/// A note the app may touch: tracked, or part of an index it has built. Prevents the UI from naming arbitrary paths.
+fn is_known_note(path: &Path, store: &Store, vaults: &vault::VaultState) -> bool {
+    let tracked = store.files().iter().any(|f| Path::new(&f.canonical_path) == path);
+    tracked || vaults.0.lock().is_ok_and(|all| all.values().any(|ix| ix.index_of(path).is_some()))
+}
+
+/// Result of a task toggle: `done`, or `stale` when the note changed since it was listed (nothing was written).
+#[tauri::command(async)]
+fn toggle_vault_task(
+    path: String,
+    offset: usize,
+    expect: String,
+    checked: bool,
+    store: State<Store>,
+    vaults: State<vault::VaultState>,
+    locks: State<FileLocks>,
+) -> Result<&'static str, String> {
+    let p = Path::new(&path);
+    if !is_known_note(p, &store, &vaults) {
+        return Err("That note is not part of your tasks list.".into());
+    }
+    match locks.toggle_task_verified(p, offset, &expect, checked) {
+        Ok(_) => Ok("done"),
+        Err(ToggleError::Stale { .. }) => Ok("stale"),
+        Err(ToggleError::Failed { message }) => Err(message),
+    }
+}
+
+/// Opens a note from the tasks list in its own window.
+#[tauri::command(async)]
+fn open_note_by_path(app: AppHandle, path: String, store: State<Store>, vaults: State<vault::VaultState>) -> Result<(), String> {
+    if !is_known_note(Path::new(&path), &store, &vaults) {
+        return Err("That note is not part of your tasks list.".into());
+    }
+    let file = store.register(&path)?;
+    open_tracker_impl(&app, &file.id)
+}
+
+#[tauri::command]
+fn open_tasks_window(app: AppHandle) -> Result<(), String> {
+    windows::open_tasks(&app)
+}
+
 // ---- Optional Obsidian layer ----
 
 #[derive(Serialize)]
@@ -554,6 +704,7 @@ pub fn run() {
                     &item("show", "Open launcher")?,
                     &item("show_all", "Show all trackers")?,
                     &item("hide_all", "Hide all trackers")?,
+                    &item("tasks", "Open tasks…")?,
                     &item("voice", "Voice Intelligence…")?,
                     &item("settings", "Settings…")?,
                     &PredefinedMenuItem::separator(app)?,
@@ -565,6 +716,9 @@ pub fn run() {
                 "settings" => windows::show_launcher(app, "settings"),
                 "voice" => {
                     let _ = windows::open_voice(app);
+                }
+                "tasks" => {
+                    let _ = windows::open_tasks(app);
                 }
                 "show_all" => windows::show_all_trackers(app),
                 "hide_all" => windows::hide_all_trackers(app),
@@ -628,6 +782,10 @@ pub fn run() {
             tracker_info,
             hide_launcher,
             open_voice,
+            open_tasks_window,
+            open_tasks,
+            toggle_vault_task,
+            open_note_by_path,
             open_external,
             open_wikilink,
             note_context,
@@ -676,4 +834,61 @@ pub fn run() {
             }
             _ => {}
         });
+}
+
+#[cfg(test)]
+mod task_tests {
+    use super::*;
+    use std::collections::HashMap;
+    use std::fs;
+
+    fn dir(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("mdc-tasks-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        fs::canonicalize(d).unwrap()
+    }
+
+    #[test]
+    fn gathers_open_tasks_across_vaults_and_loose_files_without_duplicates() {
+        let vault = dir("vault");
+        fs::create_dir_all(vault.join(".obsidian")).unwrap();
+        fs::create_dir_all(vault.join("Meetings")).unwrap();
+        fs::write(vault.join("Meetings/Sprint.md"), "- [ ] send notes 📅 2026-11-01\n- [x] done already\n- [ ] water plants 🔁 every week\n").unwrap();
+        fs::write(vault.join("Inbox.md"), "- [ ] no date\n").unwrap();
+        let loose_dir = dir("loose");
+        let loose = loose_dir.join("todo.md");
+        fs::write(&loose, "- [ ] standalone task\n").unwrap();
+
+        let mut indexes = HashMap::new();
+        // the same vault listed twice (a watched folder and a tracked note's vault) must not duplicate rows
+        let roots = vec![(vault.clone(), true), (vault.clone(), true)];
+        let view = collect_tasks(roots, vec![loose.clone()], &mut indexes);
+
+        let mut titles: Vec<&str> = view.rows.iter().map(|r| r.title.as_str()).collect();
+        titles.sort();
+        assert_eq!(titles, vec!["no date", "send notes", "standalone task", "water plants"]);
+        let sprint = view.rows.iter().find(|r| r.title == "send notes").unwrap();
+        assert_eq!((sprint.due.as_deref(), sprint.note.as_str(), sprint.recurring), (Some("2026-11-01"), "Sprint", false));
+        assert!(view.rows.iter().find(|r| r.title == "water plants").unwrap().recurring);
+        assert_eq!(view.sources.len(), 2); // the vault is listed once per root entry given; callers dedupe roots
+        assert!(!view.truncated);
+    }
+
+    #[test]
+    fn a_task_listed_here_can_be_toggled_with_the_offset_and_text_it_came_with() {
+        let vault = dir("toggle");
+        fs::create_dir_all(vault.join(".obsidian")).unwrap();
+        let note = vault.join("n.md");
+        fs::write(&note, "# T\n- [ ] first\n- [ ] second\n").unwrap();
+        let mut indexes = HashMap::new();
+        let view = collect_tasks(vec![(vault.clone(), true)], vec![], &mut indexes);
+        let t = view.rows.iter().find(|r| r.title == "second").unwrap();
+        let locks = FileLocks::default();
+        locks.toggle_task_verified(&note, t.offset, &t.raw, true).unwrap();
+        assert_eq!(fs::read_to_string(&note).unwrap(), "# T\n- [ ] first\n- [x] second\n");
+        // after the next refresh the completed task is no longer listed
+        let again = collect_tasks(vec![(vault, true)], vec![], &mut indexes);
+        assert_eq!(again.rows.iter().map(|r| r.title.as_str()).collect::<Vec<_>>(), vec!["first"]);
+    }
 }

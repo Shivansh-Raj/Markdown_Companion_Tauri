@@ -66,3 +66,23 @@ export interface NoteContext {
 
 /** Where the Groq key is stored. `file` means it is unprotected in the app data file; `warning` says why. */
 export type KeyStorage = { kind: "none" } | { kind: "keychain" } | { kind: "file"; warning: string };
+
+export interface TaskRow {
+  path: string;
+  note: string;
+  rel: string;
+  source: string;
+  offset: number;
+  line: number;
+  title: string;
+  raw: string;
+  due: string | null;
+  scheduled: string | null;
+  recurring: boolean;
+}
+
+export interface TasksView {
+  rows: TaskRow[];
+  sources: string[];
+  truncated: boolean;
+}

@@ -21,11 +21,30 @@ pub struct Link {
     pub label: String,
 }
 
+/// A `- [ ]` / `- [x]` task line. Only the default statuses are recognised, as in the note window.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TaskItem {
+    /// Byte offset of the `[` of the marker in the file.
+    pub offset: usize,
+    /// 1-based line number.
+    pub line: usize,
+    pub done: bool,
+    /// The text after the marker, as written (used to verify the line before changing it).
+    pub raw: String,
+    /// `raw` up to the first Obsidian Tasks marker (due date, recurrence, priority…), for display.
+    pub title: String,
+    pub due: Option<String>,
+    pub scheduled: Option<String>,
+    /// Has a `🔁` rule. Completing it creates the next occurrence in Obsidian, so MC never toggles these.
+    pub recurring: bool,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Parsed {
     pub aliases: Vec<String>,
     pub tags: Vec<String>,
     pub links: Vec<Link>,
+    pub tasks: Vec<TaskItem>,
 }
 
 // ---- Parsing ----
@@ -198,12 +217,85 @@ fn scan_line(line: &str, links: &mut Vec<Link>, tags: &mut Vec<String>) {
     }
 }
 
+const TASK_MARKERS: [&str; 11] = ["📅", "⏳", "🛫", "➕", "✅", "❌", "🔁", "🔺", "⏫", "🔼", "🔽"];
+
+fn date_after(text: &str, marker: &str) -> Option<String> {
+    let rest = text[text.find(marker)? + marker.len()..].trim_start();
+    let d = rest.get(..10)?;
+    let ok = d.bytes().enumerate().all(|(i, b)| if i == 4 || i == 7 { b == b'-' } else { b.is_ascii_digit() });
+    ok.then(|| d.to_string())
+}
+
+/// Parses one line as a task: optional quote markers and indent, a list bullet, then `[ ]`, `[x]` or `[X]`.
+/// Returns (marker offset in the line, done, text after the marker).
+fn parse_task_line(line: &str) -> Option<(usize, bool, &str)> {
+    let b = line.as_bytes();
+    let mut i = 0;
+    while i < b.len() && matches!(b[i], b' ' | b'\t' | b'>') {
+        i += 1;
+    }
+    if i < b.len() && matches!(b[i], b'-' | b'*' | b'+') {
+        i += 1;
+    } else {
+        let digits = b[i..].iter().take_while(|c| c.is_ascii_digit()).count();
+        if digits == 0 || digits > 9 || !matches!(b.get(i + digits), Some(b'.' | b')')) {
+            return None;
+        }
+        i += digits + 1;
+    }
+    let gap = b[i..].iter().take_while(|c| matches!(c, b' ' | b'\t')).count();
+    if gap == 0 {
+        return None;
+    }
+    i += gap;
+    if b.get(i) != Some(&b'[') || b.get(i + 2) != Some(&b']') {
+        return None;
+    }
+    let done = match b.get(i + 1)? {
+        b' ' => false,
+        b'x' | b'X' => true,
+        _ => return None,
+    };
+    let after = line.get(i + 3..)?;
+    // Obsidian needs a space after `]`; an empty task text is not a task.
+    let text = after.strip_prefix([' ', '\t'])?;
+    (!text.trim().is_empty()).then_some((i, done, text))
+}
+
+fn task_from(line_no: usize, offset: usize, done: bool, text: &str) -> TaskItem {
+    let raw = text.trim().to_string();
+    let cut = TASK_MARKERS.iter().filter_map(|m| raw.find(m)).min().unwrap_or(raw.len());
+    let mut title = raw[..cut].trim();
+    // a trailing Obsidian block id (`^abc-1`) is not part of the title
+    if let Some(pos) = title.rfind(" ^")
+        && title[pos + 2..].bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
+        && title.len() > pos + 2
+    {
+        title = title[..pos].trim_end();
+    }
+    TaskItem {
+        offset,
+        line: line_no,
+        done,
+        title: title.to_string(),
+        due: date_after(&raw, "📅"),
+        scheduled: date_after(&raw, "⏳"),
+        recurring: raw.contains("🔁"),
+        raw,
+    }
+}
+
 pub fn parse_note(content: &str) -> Parsed {
     let (fm, body) = split_frontmatter(content);
     let (mut tags, aliases) = frontmatter_lists(&fm);
     let mut links = Vec::new();
+    let mut tasks = Vec::new();
     let mut fence: Option<(u8, usize)> = None;
-    for line in body.lines() {
+    let body_start = body.as_ptr() as usize - content.as_ptr() as usize;
+    let first_line = content[..body_start].bytes().filter(|b| *b == b'\n').count() + 1;
+    for (n, line) in body.split('\n').enumerate() {
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        let line_offset = body_start + (line.as_ptr() as usize - body.as_ptr() as usize);
         let t = line.trim_start();
         if let Some((c, n)) = fence_marker(t) {
             match fence {
@@ -215,11 +307,14 @@ pub fn parse_note(content: &str) -> Parsed {
         }
         if fence.is_none() {
             scan_line(line, &mut links, &mut tags);
+            if let Some((at, done, text)) = parse_task_line(line) {
+                tasks.push(task_from(first_line + n, line_offset + at, done, text));
+            }
         }
     }
     let mut seen = HashSet::new();
     tags.retain(|t| seen.insert(t.to_lowercase()));
-    Parsed { aliases, tags, links }
+    Parsed { aliases, tags, links, tasks }
 }
 
 // ---- Index ----
@@ -545,5 +640,39 @@ mod tests {
         let w = vec![plain.clone(), plain.join("sub")];
         assert_eq!(index_root_for(&plain.join("sub/n.md"), &w), Some((plain.join("sub"), false)));
         assert_eq!(index_root_for(&plain.join("elsewhere.md"), &[]), None);
+    }
+
+    #[test]
+    fn finds_tasks_with_byte_offsets_that_point_at_the_marker() {
+        let md = "---\ntags: [x]\n---\n# T\n- [ ] plain\n  * [x] nested done\n> - [ ] in a callout\n1. [ ] numbered 📅 2026-12-01 ⏳ 2026-11-30\n- [/] custom status\n- [ ]\n- [ ]no space\n- not a task\n```\n- [ ] in code\n```\n- [ ] with id ^abc-1\n";
+        let p = parse_note(md);
+        let got: Vec<(&str, bool, usize)> = p.tasks.iter().map(|t| (t.title.as_str(), t.done, t.line)).collect();
+        assert_eq!(got, vec![("plain", false, 5), ("nested done", true, 6), ("in a callout", false, 7), ("numbered", false, 8), ("with id", false, 16)]);
+        for t in &p.tasks {
+            let marker = &md[t.offset..t.offset + 3];
+            assert!(marker == "[ ]" || marker == "[x]", "{marker:?} at {}", t.offset);
+        }
+        let n = &p.tasks[3];
+        assert_eq!((n.due.as_deref(), n.scheduled.as_deref(), n.recurring), (Some("2026-12-01"), Some("2026-11-30"), false));
+    }
+
+    #[test]
+    fn recurring_and_crlf_and_bom_are_handled() {
+        let md = "\u{feff}- [ ] water plants 🔁 every week 📅 2026-12-02\r\n- [ ] second\r\n";
+        let p = parse_note(md);
+        assert_eq!(p.tasks.len(), 2);
+        assert!(p.tasks[0].recurring);
+        assert_eq!(p.tasks[0].title, "water plants");
+        assert_eq!(p.tasks[0].due.as_deref(), Some("2026-12-02"));
+        for t in &p.tasks {
+            assert_eq!(&md[t.offset..t.offset + 3], "[ ]");
+        }
+        assert_eq!(p.tasks[1].line, 2);
+    }
+
+    #[test]
+    fn invalid_dates_are_ignored() {
+        let p = parse_note("- [ ] a 📅 tomorrow\n- [ ] b 📅 2026-1-5\n");
+        assert!(p.tasks.iter().all(|t| t.due.is_none()));
     }
 }
