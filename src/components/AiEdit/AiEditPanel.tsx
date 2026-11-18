@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../services/api";
 import { streamChat } from "../../services/ai";
+import { useReceipt } from "../Receipt/ReceiptProvider";
 import {
   MAX_EDIT_CHARS,
   buildEditSystemPrompt,
@@ -37,6 +38,7 @@ interface Props {
 }
 
 export function AiEditPanel({ content, currentHash, selection, onApply, onClose }: Props) {
+  const approve = useReceipt();
   const sections = useMemo(() => sectionsOf(content), [content]);
   const [scopeKind, setScopeKind] = useState<"selection" | "section" | "whole">(selection ? "selection" : sections.length ? "section" : "whole");
   const [sectionIdx, setSectionIdx] = useState(0);
@@ -81,6 +83,14 @@ export function AiEditPanel({ content, currentHash, selection, onApply, onClose 
       setError("No Groq API key yet. Open the launcher, choose NEW WITH AI and set it with the KEY button.");
       return;
     }
+    const system = buildEditSystemPrompt(scope.kind);
+    const user = buildEditUserPrompt(instruction, text);
+    const where = scope.kind === "selection" ? "Selected text" : scope.kind === "section" ? `Section "${scope.section.title}"` : "Whole file";
+    const approved = await approve([{
+      purpose: "Edit with AI", system, user, mode: "review",
+      items: [{ label: where, text }, { label: "Your instruction", text: instruction.trim(), typed: true }],
+    }]);
+    if (!approved) return; // declined: nothing was sent
     setHistory((h) => pushHistory(h, instruction));
     setLive("");
     startHash.current = currentHash;
@@ -92,8 +102,7 @@ export function AiEditPanel({ content, currentHash, selection, onApply, onClose 
     try {
       const out = await streamChat({
         apiKey,
-        system: buildEditSystemPrompt(scope.kind),
-        user: buildEditUserPrompt(instruction, text),
+        approval: approved[0],
         signal: ctl.signal,
         onText: (t) => {
           setChars(t.length);

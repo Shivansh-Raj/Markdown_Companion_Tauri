@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "../../services/api";
 import { MarkdownRenderer } from "../MarkdownRenderer/MarkdownRenderer";
 import { streamChat } from "../../services/ai";
+import { useReceipt } from "../Receipt/ReceiptProvider";
 import {
-  buildAskSystemPrompt, buildAskUserPrompt, isNotFound, limitDoc, parseAskAnswer, type ParsedAnswer, type Turn,
+  askHistoryText, buildAskSystemPrompt, buildAskUserPrompt, isNotFound, limitDoc, parseAskAnswer, type ParsedAnswer, type Turn,
 } from "../../services/aiAsk";
 
 /** Answers are Markdown (lists, bold, code): render them instead of showing raw characters. */
@@ -30,6 +31,7 @@ export function AskPanel({ content, fileName, onClose }: { content: string; file
   const scroller = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   const { text: doc, truncated } = limitDoc(content);
+  const approve = useReceipt();
 
   useEffect(() => () => abort.current?.abort(), []);
   useEffect(() => {
@@ -46,6 +48,18 @@ export function AskPanel({ content, fileName, onClose }: { content: string; file
       setError("No Groq API key yet. Open the launcher, choose NEW WITH AI and set it with the KEY button.");
       return;
     }
+    const turns = items.filter((i) => !i.error);
+    const system = buildAskSystemPrompt();
+    const user = buildAskUserPrompt(text, turns, doc);
+    const approved = await approve([{
+      purpose: `Ask about ${fileName}`, system, user, mode: "review",
+      items: [
+        { label: `${fileName}${truncated ? " (first part of the file)" : " (whole file)"}`, text: doc, note: truncated ? "The file is very long, so only the first part is sent." : undefined },
+        ...(turns.length ? [{ label: "Earlier answers in this chat", text: askHistoryText(turns) }] : []),
+        { label: "Your question", text, typed: true },
+      ],
+    }]);
+    if (!approved) return; // declined: nothing was sent, and the question stays in the box
     setQuestion("");
     setAsked(text);
     setLive("");
@@ -53,7 +67,7 @@ export function AskPanel({ content, fileName, onClose }: { content: string; file
     abort.current = ctl;
     try {
       const raw = await streamChat({
-        apiKey, system: buildAskSystemPrompt(), user: buildAskUserPrompt(text, items.filter((i) => !i.error), doc),
+        apiKey, approval: approved[0],
         signal: ctl.signal, onText: (t) => setLive(t.replace(/\n?\s*SOURCES:[\s\S]*$/i, "")),
       });
       const parsed = parseAskAnswer(raw, doc);

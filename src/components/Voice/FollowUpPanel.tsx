@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../services/api";
 import { streamChat } from "../../services/ai";
+import { useReceipt } from "../Receipt/ReceiptProvider";
+import type { ReceiptRequest } from "../../services/receipt";
 import { limitTranscript, timedTranscript, type AnalysisResult } from "../../services/voice/analyses";
 import {
   buildFollowUpSystemPrompt, buildFollowUpUserPrompt, buildTopicsSystemPrompt, buildTopicsUserPrompt, followUpMarkdown, matchCheckboxState,
+  priorItemsText, priorSummariesText,
   toFollowUps, toTopics, type FollowUpReport, type PriorItem,
 } from "../../services/voice/followups";
 import type { Section } from "../../services/voice/templates";
@@ -30,6 +33,7 @@ const newest = (list: AnalysisResult[], type: string) =>
  * files; nothing is ticked or edited, and a repeated mention never counts as "unfinished" by itself.
  */
 export function FollowUpPanel({ meta, chunks, ready }: { meta: SessionMeta; chunks: TranscriptChunk[]; ready: boolean }) {
+  const approve = useReceipt();
   const [report, setReport] = useState<FollowUpReport | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -86,9 +90,28 @@ export function FollowUpPanel({ meta, chunks, ready }: { meta: SessionMeta; chun
       const open = items.filter((i) => i.state !== "done");
       let results: FollowUpReport["results"] = items.map((i) => ({ id: i.id, status: "not_mentioned" as const, evidence: "", note: "" }));
       let dropped = 0;
+      // Review both requests together before anything is sent. Your other Markdown files were read on this
+      // computer only to match checkbox states; their content is not part of either request.
+      const transcriptItem = { label: `Transcript of "${meta.title}"`, text: plain };
+      const reqs: ReceiptRequest[] = [];
+      if (open.length) {
+        reqs.push({
+          purpose: "Check earlier action items", system: buildFollowUpSystemPrompt(), user: buildFollowUpUserPrompt(open, plain, rethink), mode: "review",
+          items: [{ label: `Open action items from ${sessions.length} earlier meeting${sessions.length === 1 ? "" : "s"}`, text: priorItemsText(open) }, transcriptItem],
+        });
+      }
+      if (summaries.length) {
+        reqs.push({
+          purpose: "Find recurring topics", system: buildTopicsSystemPrompt(), user: buildTopicsUserPrompt(summaries, plain, rethink), mode: "review",
+          items: [{ label: "Summaries of earlier meetings", text: priorSummariesText(summaries) }, transcriptItem],
+        });
+      }
+      const approvals = reqs.length ? await approve(reqs) : [];
+      if (!approvals) { setStatus(null); abort.current = null; return; }
+      let next = 0;
       if (open.length) {
         setStatus("Comparing with this meeting…");
-        const raw = await streamChat({ apiKey, system: buildFollowUpSystemPrompt(), user: buildFollowUpUserPrompt(open, plain, rethink), signal: ctl.signal, onText: () => {} });
+        const raw = await streamChat({ apiKey, approval: approvals[next++], signal: ctl.signal, onText: () => {} });
         const parsed = toFollowUps(raw, open, plain);
         dropped += parsed.dropped;
         results = results.map((r) => parsed.results.find((p) => p.id === r.id) ?? r);
@@ -97,7 +120,7 @@ export function FollowUpPanel({ meta, chunks, ready }: { meta: SessionMeta; chun
       if (summaries.length) {
         setStatus("Looking for topics that keep coming up…");
         try {
-          const raw = await streamChat({ apiKey, system: buildTopicsSystemPrompt(), user: buildTopicsUserPrompt(summaries, plain, rethink), signal: ctl.signal, onText: () => {} });
+          const raw = await streamChat({ apiKey, approval: approvals[next++], signal: ctl.signal, onText: () => {} });
           const t = toTopics(raw, plain);
           topics = t.topics;
           dropped += t.dropped;

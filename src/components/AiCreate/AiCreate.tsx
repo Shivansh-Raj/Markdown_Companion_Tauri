@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../services/api";
 import {
+  buildSystemPrompt,
   DOC_TYPE_LABELS,
   splitTypeLine,
   streamGeneration,
@@ -9,12 +10,14 @@ import {
   type DocTypeChoice,
 } from "../../services/ai";
 import { MarkdownRenderer } from "../MarkdownRenderer/MarkdownRenderer";
+import { useReceipt } from "../Receipt/ReceiptProvider";
 import { TypingCat } from "./TypingCat";
 
 type Phase = "input" | "generating" | "done";
 const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
 
 export function AiCreate({ onBack, onCreated }: { onBack: () => void; onCreated: (id: string) => void }) {
+  const approve = useReceipt();
   const [phase, setPhase] = useState<Phase>("input");
   const [prompt, setPrompt] = useState("");
   const [typeChoice, setTypeChoice] = useState<DocTypeChoice>("auto");
@@ -65,10 +68,15 @@ export function AiCreate({ onBack, onCreated }: { onBack: () => void; onCreated:
     const ctl = new AbortController();
     abort.current = ctl;
     try {
+      // Only what you typed is sent, so there is nothing to review: this approval needs no dialog.
+      const typed = prompt.trim();
+      const [approved] = (await approve([{
+        purpose: "Create a file", system: buildSystemPrompt(typeChoice), user: typed, mode: "typed",
+        items: [{ label: "Your prompt", text: typed, typed: true }],
+      }]))!;
       const full = await streamGeneration({
         apiKey,
-        prompt: prompt.trim(),
-        type: typeChoice,
+        approval: approved,
         signal: ctl.signal,
         onText: setRaw,
       });

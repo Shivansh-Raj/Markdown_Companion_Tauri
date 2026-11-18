@@ -91,10 +91,14 @@ export function buildFollowUpSystemPrompt(): string {
 const RETHINK = "The user was not satisfied with the previous answer. Re-read the transcript carefully and reconsider each point, " +
   "this time being stricter about evidence.\n\n";
 
-export function buildFollowUpUserPrompt(items: PriorItem[], transcript: string, rethink = false): string {
-  const list = items
+export function priorItemsText(items: PriorItem[]): string {
+  return items
     .map((i) => `- id=${i.id} | task: ${i.task} | owner: ${i.owner ?? "not stated"} | due: ${i.deadline ?? "not stated"} | from: ${i.meetingTitle} (${i.meetingDate})`)
     .join("\n");
+}
+
+export function buildFollowUpUserPrompt(items: PriorItem[], transcript: string, rethink = false): string {
+  const list = priorItemsText(items);
   return `${rethink ? RETHINK : ""}Earlier action items:\n${list}\n\nNew meeting transcript:\n"""\n${transcript}\n"""`;
 }
 
@@ -134,8 +138,12 @@ export function buildTopicsSystemPrompt(): string {
   );
 }
 
+export function priorSummariesText(summaries: { title: string; date: string; markdown: string }[]): string {
+  return summaries.map((s) => `### ${s.title} (${s.date})\n${s.markdown}`).join("\n\n");
+}
+
 export function buildTopicsUserPrompt(summaries: { title: string; date: string; markdown: string }[], transcript: string, rethink = false): string {
-  const prior = summaries.map((s) => `### ${s.title} (${s.date})\n${s.markdown}`).join("\n\n");
+  const prior = priorSummariesText(summaries);
   return `${rethink ? RETHINK : ""}Earlier meetings:\n${prior}\n\nNew meeting transcript:\n"""\n${transcript}\n"""`;
 }
 

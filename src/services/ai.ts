@@ -1,3 +1,5 @@
+import { approvedPayload, type Approved } from "./receipt";
+
 export const DOC_TYPES = ["plan", "tasks", "scheduler", "notes"] as const;
 export type DocType = (typeof DOC_TYPES)[number];
 export type DocTypeChoice = DocType | "auto";
@@ -131,13 +133,17 @@ export function parseSse(buffer: string): { deltas: string[]; rest: string; done
   return { deltas, rest, done };
 }
 
+/**
+ * The only function that sends text to the model. It takes the text from an `Approved` receipt (see receipt.ts),
+ * so it cannot send anything the user was not shown.
+ */
 export async function streamChat(opts: {
   apiKey: string;
-  system: string;
-  user: string;
+  approval: Approved;
   signal: AbortSignal;
   onText: (full: string) => void;
 }): Promise<string> {
+  const { system, user } = approvedPayload(opts.approval);
   const model = await resolveModel(opts.apiKey, opts.signal);
   const res = await groqFetch(ENDPOINT, {
     method: "POST",
@@ -148,8 +154,8 @@ export async function streamChat(opts: {
       stream: true,
       temperature: 0.3,
       messages: [
-        { role: "system", content: opts.system },
-        { role: "user", content: opts.user },
+        { role: "system", content: system },
+        { role: "user", content: user },
       ],
     }),
   });
@@ -185,16 +191,9 @@ export async function streamChat(opts: {
 
 export function streamGeneration(opts: {
   apiKey: string;
-  prompt: string;
-  type: DocTypeChoice;
+  approval: Approved;
   signal: AbortSignal;
   onText: (full: string) => void;
 }): Promise<string> {
-  return streamChat({
-    apiKey: opts.apiKey,
-    system: buildSystemPrompt(opts.type),
-    user: opts.prompt,
-    signal: opts.signal,
-    onText: opts.onText,
-  });
+  return streamChat(opts);
 }

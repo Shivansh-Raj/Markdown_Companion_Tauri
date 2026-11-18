@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../../services/api";
 import { streamChat } from "../../services/ai";
+import { useReceipt } from "../Receipt/ReceiptProvider";
 import {
   ANALYSIS_LABELS, ANALYSIS_TYPES, buildSystemPrompt, buildUserPrompt, latestByType, limitTranscript, timedTranscript,
   toResult, type AnalysisResult, type AnalysisType,
@@ -11,6 +12,7 @@ import type { SessionMeta, TranscriptChunk } from "../../services/voice/types";
 
 /** Meeting analyses (summary, takeaways, action items) with Markdown export. Regenerable from the transcript. */
 export function AnalysisPanel({ meta, chunks, ready }: { meta: SessionMeta; chunks: TranscriptChunk[]; ready: boolean }) {
+  const approve = useReceipt();
   const [selected, setSelected] = useState<Set<AnalysisType>>(new Set(ANALYSIS_TYPES));
   const [results, setResults] = useState<Partial<Record<AnalysisType, AnalysisResult>>>({});
   const [errors, setErrors] = useState<Partial<Record<AnalysisType, string>>>({});
@@ -41,7 +43,15 @@ export function AnalysisPanel({ meta, chunks, ready }: { meta: SessionMeta; chun
     const ctl = new AbortController();
     abort.current = ctl;
     const { text, truncated } = limitTranscript(timedTranscript(chunks));
-    for (const type of types) {
+    // One review covers every analysis in this run, since they all send the same transcript.
+    const approvals = apiKey
+      ? await approve(types.map((type) => ({
+          purpose: `${ANALYSIS_LABELS[type]} for "${meta.title}"`, system: buildSystemPrompt(type), user: buildUserPrompt(meta, text), mode: "review" as const,
+          items: [{ label: `Transcript of "${meta.title}"`, text, note: truncated ? "The recording is very long, so only the first part is sent." : undefined }],
+        })))
+      : null;
+    if (apiKey && !approvals) { abort.current = null; return; }
+    for (const [n, type] of types.entries()) {
       if (ctl.signal.aborted) break;
       setRunning(type);
       setErrors((e) => ({ ...e, [type]: undefined }));
@@ -49,7 +59,7 @@ export function AnalysisPanel({ meta, chunks, ready }: { meta: SessionMeta; chun
       try {
         if (!apiKey) throw new Error("No Groq API key. Add one in the launcher: AI → key.");
         const raw = await streamChat({
-          apiKey, system: buildSystemPrompt(type), user: buildUserPrompt(meta, text), signal: ctl.signal,
+          apiKey, approval: approvals![n], signal: ctl.signal,
           onText: (t) => setLive((l) => ({ ...l, [type]: t })),
         });
         const result = toResult(type, raw, truncated);

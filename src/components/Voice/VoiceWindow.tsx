@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "../../services/api";
 import { streamChat, stripFence, titleFromMarkdown } from "../../services/ai";
+import { useReceipt } from "../Receipt/ReceiptProvider";
 import {
   buildNoteSystemPrompt, buildNoteUserPrompt, formatClock, suggestFileName, transcriptMarkdown, transcriptText, wordCount,
 } from "../../services/voice/transcript";
@@ -27,6 +28,7 @@ const MODE_HINT: Record<VoiceMode, string> = {
 };
 
 export function VoiceWindow() {
+  const approve = useReceipt();
   const v = useVoiceSession();
   const [mode, setMode] = useState<VoiceMode | null>(null);
   const [title, setTitle] = useState("");
@@ -101,8 +103,13 @@ export function VoiceWindow() {
     try {
       const key = await api.getGroqKey();
       if (!key) throw new Error("No Groq API key. Add one in the launcher: AI → key.");
+      const approved = await approve([{
+        purpose: "Turn the recording into a note", system: buildNoteSystemPrompt(), user: buildNoteUserPrompt(full), mode: "review",
+        items: [{ label: "Transcript of this recording", text: full }],
+      }]);
+      if (!approved) return;
       const out = await streamChat({
-        apiKey: key, system: buildNoteSystemPrompt(), user: buildNoteUserPrompt(full), signal: ctl.signal, onText: setNote,
+        apiKey: key, approval: approved[0], signal: ctl.signal, onText: setNote,
       });
       setNote(stripFence(out));
     } catch (e) {

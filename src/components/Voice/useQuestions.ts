@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../services/api";
 import { streamChat } from "../../services/ai";
+import { useReceipt } from "../Receipt/ReceiptProvider";
 import {
   buildQuestionSystemPrompt, buildQuestionUserPrompt, parseQuestions, recentContext, shouldSuggest, type Suggestion,
 } from "../../services/voice/followups";
@@ -16,6 +17,7 @@ const write = (on: boolean) => { try { localStorage.setItem(KEY, on ? "on" : "of
  * runs beside the recording and never blocks or interrupts it: any failure is swallowed.
  */
 export function useQuestions(opts: { active: boolean; paused: boolean; chunks: TranscriptChunk[]; transcribing: number }) {
+  const approve = useReceipt();
   const [enabled, setEnabledState] = useState(read);
   const [ideas, setIdeas] = useState<(Suggestion & { id: number })[]>([]);
   const [thinking, setThinking] = useState(false);
@@ -47,10 +49,14 @@ export function useQuestions(opts: { active: boolean; paused: boolean; chunks: T
     try {
       const key = await api.getGroqKey();
       if (!key) return;
-      const raw = await streamChat({
-        apiKey: key, system: buildQuestionSystemPrompt(), user: buildQuestionUserPrompt(recentContext(text), asked.current, rethink),
-        signal: new AbortController().signal, onText: () => {},
-      });
+      // "standing": the user switched this feature on (or pressed RETHINK), so each round is not asked about again.
+      const recent = recentContext(text);
+      const approved = await approve([{
+        purpose: "Live question suggestions", system: buildQuestionSystemPrompt(), user: buildQuestionUserPrompt(recent, asked.current, rethink), mode: "standing",
+        items: [{ label: "Most recent part of the transcript", text: recent }],
+      }]);
+      if (!approved) return;
+      const raw = await streamChat({ apiKey: key, approval: approved[0], signal: new AbortController().signal, onText: () => {} });
       const fresh = parseQuestions(raw, asked.current);
       if (fresh.length) {
         asked.current = [...asked.current, ...fresh.map((f) => f.question)].slice(-30);
@@ -65,7 +71,7 @@ export function useQuestions(opts: { active: boolean; paused: boolean; chunks: T
       inFlight.current = false;
       setThinking(false);
     }
-  }, []);
+  }, [approve]);
 
   useEffect(() => {
     if (!opts.active) { setIdeas([]); asked.current = []; lastAt.current = 0; lastWords.current = 0; return; }

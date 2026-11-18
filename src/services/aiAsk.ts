@@ -28,8 +28,12 @@ export function limitDoc(content: string): { text: string; truncated: boolean } 
 }
 
 /** Earlier turns are included (briefly) so follow-up questions like "and who owns it?" make sense. */
+export function askHistoryText(history: Turn[]): string {
+  return history.slice(-4).map((t) => `Q: ${t.question}\nA: ${t.answer.slice(0, 600)}`).join("\n\n");
+}
+
 export function buildAskUserPrompt(question: string, history: Turn[], doc: string): string {
-  const prior = history.slice(-4).map((t) => `Q: ${t.question}\nA: ${t.answer.slice(0, 600)}`).join("\n\n");
+  const prior = askHistoryText(history);
   return `${prior ? `Earlier in this conversation:\n${prior}\n\n` : ""}Document:\n"""\n${doc}\n"""\n\nQuestion: ${question}`;
 }
 

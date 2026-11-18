@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../../services/api";
 import { streamChat } from "../../services/ai";
+import { useReceipt } from "../Receipt/ReceiptProvider";
 import { computeAnalytics, DELIVERY_CAVEAT, PACE_REFERENCE } from "../../services/voice/analytics";
 import {
   buildCoachSystemPrompt, buildCoachUserPrompt, COACH_LABELS, COACH_TYPES, coachMarkdown, selectedSentencesMarkdown, sentenceBlock,
@@ -16,6 +17,7 @@ const STYLES: Style[] = ["natural", "professional", "concise"];
 
 /** Practice mode: objective speaking numbers (computed locally) plus AI coaching grounded in what was said. */
 export function PracticePanel({ meta, chunks, ready }: { meta: SessionMeta; chunks: TranscriptChunk[]; ready: boolean }) {
+  const approve = useReceipt();
   const analytics = useMemo(() => computeAnalytics(chunks, meta.durationMs), [chunks, meta.durationMs]);
   const [selected, setSelected] = useState<Set<CoachType>>(new Set(COACH_TYPES));
   const [results, setResults] = useState<Partial<Record<CoachType, CoachResult>>>({});
@@ -49,7 +51,14 @@ export function PracticePanel({ meta, chunks, ready }: { meta: SessionMeta; chun
     abort.current = ctl;
     const { text, truncated } = limitTranscript(timedTranscript(chunks));
     const plain = text.replace(/^\[\d+(?::\d+)+\]\s*/gm, ""); // quotes are checked against the spoken words only
-    for (const type of types) {
+    const approvals = apiKey
+      ? await approve(types.map((type) => ({
+          purpose: `Speaking coach (${type}) for "${meta.title}"`, system: buildCoachSystemPrompt(type), user: buildCoachUserPrompt(meta.title, plain), mode: "review" as const,
+          items: [{ label: `Transcript of "${meta.title}"`, text: plain, note: truncated ? "The recording is very long, so only the first part is sent." : undefined }],
+        })))
+      : null;
+    if (apiKey && !approvals) { abort.current = null; return; }
+    for (const [n, type] of types.entries()) {
       if (ctl.signal.aborted) break;
       setRunning(type);
       setLive((l) => ({ ...l, [type]: true }));
@@ -57,7 +66,7 @@ export function PracticePanel({ meta, chunks, ready }: { meta: SessionMeta; chun
       try {
         if (!apiKey) throw new Error("No Groq API key. Add one in the launcher: AI → key.");
         const raw = await streamChat({
-          apiKey, system: buildCoachSystemPrompt(type), user: buildCoachUserPrompt(meta.title, plain), signal: ctl.signal, onText: () => {},
+          apiKey, approval: approvals![n], signal: ctl.signal, onText: () => {},
         });
         const result = toCoachResult(type, raw, plain, truncated);
         await api.voiceSaveAnalysis(meta.id, type, JSON.stringify(result));
