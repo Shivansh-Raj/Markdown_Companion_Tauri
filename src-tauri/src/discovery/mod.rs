@@ -52,7 +52,7 @@ pub fn scan_folder(root: &Path) -> Vec<PathBuf> {
 // ---- Wikilink resolution ----
 
 const LINK_MAX_DEPTH: usize = 10;
-const LINK_MAX_ENTRIES: usize = 20_000;
+pub const LINK_MAX_ENTRIES: usize = 20_000;
 
 /// The nearest ancestor of `file` that contains an `.obsidian` folder (an Obsidian vault root).
 pub fn vault_root(file: &Path) -> Option<PathBuf> {
@@ -60,7 +60,7 @@ pub fn vault_root(file: &Path) -> Option<PathBuf> {
 }
 
 /// Splits `Folder/Note#Heading|alias` into the lower-cased path part (no extension, no heading, no alias).
-fn link_path(target: &str) -> String {
+pub fn link_path(target: &str) -> String {
     let t = target.split('|').next().unwrap_or("");
     let t = t.split('#').next().unwrap_or("").trim().replace('\\', "/");
     let lower = t.to_lowercase();
@@ -69,7 +69,12 @@ fn link_path(target: &str) -> String {
 }
 
 /// Bounded, symlink-free walk collecting Markdown files under `root`.
-fn walk_markdown(root: &Path) -> Vec<PathBuf> {
+pub fn walk_markdown(root: &Path) -> Vec<PathBuf> {
+    walk_markdown_limited(root).0
+}
+
+/// Like `walk_markdown`, also reporting whether the entry limit cut the walk short.
+pub fn walk_markdown_limited(root: &Path) -> (Vec<PathBuf>, bool) {
     let mut out = Vec::new();
     let mut seen = 0usize;
     let mut stack = vec![(root.to_path_buf(), 0usize)];
@@ -78,7 +83,7 @@ fn walk_markdown(root: &Path) -> Vec<PathBuf> {
         for entry in entries.flatten() {
             seen += 1;
             if seen > LINK_MAX_ENTRIES {
-                return out;
+                return (out, true);
             }
             let name = entry.file_name().to_string_lossy().to_string();
             if name.starts_with('.') {
@@ -98,7 +103,7 @@ fn walk_markdown(root: &Path) -> Vec<PathBuf> {
             }
         }
     }
-    out
+    (out, false)
 }
 
 /// Resolves an Obsidian-style `[[wikilink]]` target to a Markdown file, or None.

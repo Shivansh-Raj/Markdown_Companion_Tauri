@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { SessionMeta, VoiceDevice, VoiceMode, VoiceStatus } from "./voice/types";
-import type { DiscoveredFile, FileEntry, FileSnapshot, LauncherInfo, Settings, TrackedFile } from "../types";
+import type { DiscoveredFile, FileEntry, FileSnapshot, LauncherInfo, NoteContext, Settings, TrackedFile } from "../types";
 
 export const api = {
   listFiles: () => invoke<FileEntry[]>("list_files"),
@@ -14,6 +14,8 @@ export const api = {
     invoke<FileSnapshot>("save_tracker_content", { id, expectedHash, content }),
   trackerInfo: (id: string) => invoke<TrackedFile>("tracker_info", { id }),
   obsidianStatus: () => invoke<{ app_installed: boolean; cli_path: string | null }>("obsidian_status"),
+  noteContext: (id: string) => invoke<NoteContext | null>("note_context", { id }),
+  openVaultNote: (id: string, path: string) => invoke<void>("open_vault_note", { id, path }),
   openWikilink: (id: string, target: string) => invoke<boolean>("open_wikilink", { id, target }),
   openInObsidian: (id: string) => invoke<void>("open_in_obsidian", { id }),
   obsidianDailyAppend: (content: string, heading?: string) =>

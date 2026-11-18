@@ -43,3 +43,23 @@ export interface DiscoveredFile {
   canonical_path: string;
   display_name: string;
 }
+
+export interface NoteRef {
+  path: string;
+  name: string;
+  rel: string;
+  /** Backlinks only: how many times that note links here. */
+  count: number;
+}
+
+export interface NoteContext {
+  vault_name: string;
+  vault_root: string;
+  is_vault: boolean;
+  note_count: number;
+  indexed_at_ms: number;
+  skipped: string[];
+  tags: string[];
+  backlinks: NoteRef[];
+  outgoing: { label: string; target: NoteRef | null }[];
+}

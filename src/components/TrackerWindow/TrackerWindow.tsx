@@ -15,6 +15,7 @@ import { MarkdownRenderer } from "../MarkdownRenderer/MarkdownRenderer";
 import { ProgressBar } from "../ProgressBar/ProgressBar";
 import { AiEditPanel } from "../AiEdit/AiEditPanel";
 import { AskPanel } from "../AiAsk/AskPanel";
+import { ContextPanel } from "../Context/ContextPanel";
 import { locateSelection } from "../../services/aiEdit";
 import type { FileSnapshot, FileStatus, SyncEvent, TrackedFile } from "../../types";
 
@@ -38,6 +39,7 @@ export function TrackerWindow({ id }: { id: string }) {
   // AI edit: results land in the edit draft (never straight on disk); `aiUndo` holds earlier drafts.
   const [aiOpen, setAiOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
+  const [ctxOpen, setCtxOpen] = useState(false);
   // Optional Obsidian handoff: the button only appears when the app is installed.
   const [obsidianApp, setObsidianApp] = useState(false);
   useEffect(() => {
@@ -251,6 +253,7 @@ export function TrackerWindow({ id }: { id: string }) {
         <span className="title" data-tauri-drag-region>{info?.display_name ?? "…"}</span>
         <button className="btn" onClick={openAi} onMouseDown={(e) => e.preventDefault()} disabled={!snap || unavailable || busy || aiOpen} aria-label="Edit with AI">AI</button>
         <button className="btn" onClick={() => setAskOpen(true)} disabled={!snap || askOpen || aiOpen} aria-label="Ask AI about this file" title="Ask a question about this file">ASK</button>
+        <button className="btn" onClick={() => setCtxOpen((o) => !o)} disabled={!snap} aria-pressed={ctxOpen} aria-label="Show linked notes" title="Backlinks, links and tags">LINKS</button>
         {obsidianApp && (
           <button className="btn" onClick={() => api.openInObsidian(id).catch((e) => setNotice(String(e)))} aria-label="Open in Obsidian" title="Open this file in Obsidian (it must be inside a vault)">OBS</button>
         )}
@@ -260,6 +263,7 @@ export function TrackerWindow({ id }: { id: string }) {
         <button className="btn" onClick={() => void win.hide()} aria-label="Hide tracker">–</button>
         <button className="btn" onClick={() => void win.close()} aria-label="Close tracker">✕</button>
       </div>
+      {ctxOpen && !editing && !aiOpen && !askOpen && <ContextPanel id={id} refreshKey={snap?.hash ?? ""} onClose={() => setCtxOpen(false)} />}
       {!editing && !aiOpen && !askOpen && doc && doc.total > 0 && <ProgressBar done={doc.done} total={doc.total} />}
       {unavailable && (
         <div className="error" role="alert">

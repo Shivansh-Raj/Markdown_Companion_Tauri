@@ -3,6 +3,7 @@ mod external;
 mod filesystem;
 mod obsidian;
 mod store;
+mod vault;
 mod watcher;
 mod voice;
 mod windows;
@@ -183,6 +184,94 @@ fn open_wikilink(app: AppHandle, id: String, target: String, store: State<Store>
     let file = store.register(&found.to_string_lossy())?;
     open_tracker_impl(&app, &file.id)?;
     Ok(true)
+}
+
+// ---- Vault index (read-only) ----
+
+#[derive(Serialize)]
+struct NoteRef {
+    path: String,
+    name: String,
+    rel: String,
+    /// How many times the linking note references this one (backlinks only).
+    count: u32,
+}
+
+#[derive(Serialize)]
+struct OutLink {
+    label: String,
+    target: Option<NoteRef>,
+}
+
+#[derive(Serialize)]
+struct NoteContext {
+    vault_name: String,
+    vault_root: String,
+    is_vault: bool,
+    note_count: usize,
+    indexed_at_ms: u64,
+    skipped: Vec<String>,
+    tags: Vec<String>,
+    backlinks: Vec<NoteRef>,
+    outgoing: Vec<OutLink>,
+}
+
+fn note_ref(n: &vault::Note, count: u32) -> NoteRef {
+    NoteRef { path: n.path.to_string_lossy().into_owned(), name: n.name.clone(), rel: n.rel.clone(), count }
+}
+
+fn watched_folders(store: &Store) -> Vec<std::path::PathBuf> {
+    store.folders().iter().map(std::path::PathBuf::from).collect()
+}
+
+/// Backlinks, outgoing links and tags for a tracked note, from a local read-only index of its vault (or watched
+/// folder). Returns None when the note is in neither. The index refreshes incrementally on every call.
+#[tauri::command(async)]
+fn note_context(id: String, store: State<Store>, vaults: State<vault::VaultState>) -> Result<Option<NoteContext>, String> {
+    let file = store.get(&id).ok_or("Unknown tracker")?;
+    let path = Path::new(&file.canonical_path);
+    let Some((root, is_vault)) = vault::index_root_for(path, &watched_folders(&store)) else { return Ok(None) };
+    let mut all = vaults.0.lock().map_err(|_| "Index is busy".to_string())?;
+    let index = all.entry(root.clone()).or_insert_with(|| vault::VaultIndex::new(root.clone(), is_vault));
+    index.refresh();
+    let Some(i) = index.index_of(path) else {
+        return Err(if index.skipped.iter().any(|s| path.ends_with(s.split(':').next().unwrap_or(""))) {
+            "This note could not be indexed (see the notes skipped by the index).".into()
+        } else {
+            "This note is outside the indexed folder depth or size limits.".into()
+        });
+    };
+    Ok(Some(NoteContext {
+        vault_name: root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        vault_root: root.to_string_lossy().into_owned(),
+        is_vault: index.is_vault,
+        note_count: index.notes.len(),
+        indexed_at_ms: index.indexed_at_ms,
+        skipped: index.skipped.clone(),
+        tags: index.notes[i].parsed.tags.clone(),
+        backlinks: index.backlinks(i).iter().map(|(b, c)| note_ref(&index.notes[*b], *c)).collect(),
+        outgoing: index
+            .outgoing(i)
+            .into_iter()
+            .map(|(l, r)| OutLink { label: l.label.clone(), target: r.map(|t| note_ref(&index.notes[t], 0)) })
+            .collect(),
+    }))
+}
+
+/// Opens a note listed by `note_context`. Only notes the index knows in the same vault can be opened this way.
+#[tauri::command(async)]
+fn open_vault_note(app: AppHandle, id: String, path: String, store: State<Store>, vaults: State<vault::VaultState>) -> Result<(), String> {
+    let from = store.get(&id).ok_or("Unknown tracker")?;
+    let (root, _) = vault::index_root_for(Path::new(&from.canonical_path), &watched_folders(&store)).ok_or("This note is not in a vault")?;
+    {
+        let all = vaults.0.lock().map_err(|_| "Index is busy".to_string())?;
+        let known = all.get(&root).is_some_and(|ix| ix.index_of(Path::new(&path)).is_some());
+        if !known {
+            return Err("That note is not part of this vault's index.".into());
+        }
+    }
+    let file = store.register(&path)?;
+    open_tracker_impl(&app, &file.id)
 }
 
 // ---- Optional Obsidian layer ----
@@ -435,6 +524,7 @@ pub fn run() {
             app.manage(voice::VoiceState::default());
             voice::recover(app.handle());
             app.manage(FileLocks::default());
+            app.manage(vault::VaultState::default());
             app.manage(Quitting::default());
 
             let handle = app.handle().clone();
@@ -534,6 +624,8 @@ pub fn run() {
             open_voice,
             open_external,
             open_wikilink,
+            note_context,
+            open_vault_note,
             obsidian_status,
             open_in_obsidian,
             obsidian_daily_append,

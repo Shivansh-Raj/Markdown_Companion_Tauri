@@ -1,0 +1,11 @@
+.ctx-panel { border-bottom: 2px solid var(--border); background: var(--surface); padding: 6px 8px; max-height: 42%; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.ctx-head { display: flex; align-items: center; gap: 6px; font-family: var(--pixel); font-size: 11px; }
+.ctx-head strong { flex: 1; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ctx-panel h4 { margin: 0 0 3px; font-family: var(--pixel); font-size: 10px; color: var(--muted); }
+.ctx-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.ctx-note { font: inherit; color: var(--accent); background: transparent; border: 1px solid var(--accent); padding: 1px 6px; cursor: pointer; }
+.ctx-note:hover, .ctx-note:focus-visible { background: var(--accent); color: var(--accent-ink); outline: none; }
+.ctx-count { margin-left: 4px; opacity: .7; }
+.ctx-missing { color: var(--muted); border: 1px dashed var(--muted); padding: 1px 6px; }
+.ctx-tag { border: 1px solid var(--muted); color: var(--muted); padding: 1px 6px; }
+.ctx-empty, .ctx-foot { color: var(--muted); }
