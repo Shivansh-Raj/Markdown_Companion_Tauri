@@ -119,6 +119,24 @@ export function actionItemsMarkdown(items: ActionItem[]): string {
     .join("\n");
 }
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Action items as single-line Obsidian Tasks entries. A `📅` due date is written only when the item's deadline is
+ * already an ISO date; free text such as "by Friday" is kept as text, never turned into a date we are guessing.
+ */
+export function actionItemsObsidianMarkdown(items: ActionItem[]): string {
+  if (!items.length) return "_No action items were identified in this meeting._";
+  return items
+    .map((i) => {
+      const owner = i.owner ? ` (owner: ${i.owner})` : "";
+      const due = i.deadline ? (ISO_DATE.test(i.deadline.trim()) ? ` 📅 ${i.deadline.trim()}` : ` (due: ${i.deadline})`) : "";
+      const ctx = i.context ? `\n  - Context: ${i.context}` : "";
+      return `- [ ] ${i.task.replace(/\s*\n\s*/g, " ")}${owner}${due}${ctx}`;
+    })
+    .join("\n");
+}
+
 export function stripFences(text: string): string {
   const m = /^\s*```(?:markdown|md|json)?\s*\n([\s\S]*?)\n?```\s*$/.exec(text);
   return (m ? m[1] : text).trim();

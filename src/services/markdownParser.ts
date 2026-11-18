@@ -1,6 +1,7 @@
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkGfm from "remark-gfm";
+import remarkFrontmatter from "remark-frontmatter";
 import type { Root, RootContent } from "mdast";
 
 export interface TaskInfo {
@@ -26,7 +27,7 @@ export interface ParsedDoc {
   total: number;
 }
 
-const processor = unified().use(remarkParse).use(remarkGfm);
+const processor = unified().use(remarkParse).use(remarkFrontmatter).use(remarkGfm);
 const MARKER_PREFIX = /^(?:[-*+]|\d{1,9}[.)])[ \t]+\[/;
 
 type AnyNode = Root | RootContent;

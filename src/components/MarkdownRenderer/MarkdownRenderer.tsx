@@ -1,6 +1,8 @@
 import { createContext, useContext, useState, type ComponentProps, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkFrontmatter from "remark-frontmatter";
+import { extractFrontmatter, parseFrontmatter, remarkObsidian } from "../../services/obsidian";
 import type { ParsedDoc, TaskInfo } from "../../services/markdownParser";
 import { TaskCheckbox } from "../TaskCheckbox/TaskCheckbox";
 import { CodeBlock } from "./CodeBlock";
@@ -9,6 +11,8 @@ import "./markdown.css";
 export interface MarkdownRendererProps {
   source: string;
   onOpenLink?: (url: string) => void;
+  /** Called with the target of a clicked `[[wikilink]]`. Without it, wikilinks are plain styled text. */
+  onOpenWikilink?: (target: string) => void;
   /** Parsed from the same source; enables interactive tasks and section progress. */
   doc?: ParsedDoc;
   onToggleTask?: (task: TaskInfo) => void;
@@ -16,7 +20,7 @@ export interface MarkdownRendererProps {
   busy?: boolean;
 }
 
-type RenderCtx = Pick<MarkdownRendererProps, "onOpenLink" | "doc" | "onToggleTask" | "busy">;
+type RenderCtx = Pick<MarkdownRendererProps, "onOpenLink" | "onOpenWikilink" | "doc" | "onToggleTask" | "busy">;
 
 // Components are module-level and read dynamic data from context, so React does not
 // remount the whole tree (and lose focus or re-highlight code) on every update.
@@ -90,8 +94,58 @@ function makeHeading(Tag: "h1" | "h2" | "h3" | "h4" | "h5" | "h6") {
   };
 }
 
+function Span({ className, children, ...rest }: ComponentProps<"span">) {
+  const { onOpenWikilink } = useContext(RenderContext);
+  const target = (rest as Record<string, unknown>)["data-target"];
+  if (className === "wikilink" && typeof target === "string" && onOpenWikilink) {
+    const open = () => onOpenWikilink(target);
+    return (
+      <span
+        className="wikilink wikilink-live"
+        role="link"
+        tabIndex={0}
+        title={`Open ${target}`}
+        onClick={open}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            open();
+          }
+        }}
+      >
+        {children}
+      </span>
+    );
+  }
+  return <span className={className}>{children}</span>;
+}
+
+function Properties({ yaml }: { yaml: string }) {
+  const entries = parseFrontmatter(yaml);
+  if (!entries.length) return null;
+  return (
+    <dl className="properties" aria-label="Properties">
+      {entries.map(({ key, value }) => (
+        <div className="property" key={key}>
+          <dt>{key}</dt>
+          <dd>
+            {Array.isArray(value)
+              ? value.map((v, i) => (
+                  <span className="property-chip" key={`${v}-${i}`}>
+                    {v}
+                  </span>
+                ))
+              : value}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 const components: Components = {
   a: Link,
+  span: Span,
   img: Img,
   li: ListItem,
   input: Checkbox,
@@ -120,12 +174,14 @@ const components: Components = {
   },
 };
 
-/** Theme-independent renderer: CommonMark + GFM. Raw HTML is never rendered as HTML. */
-export function MarkdownRenderer({ source, onOpenLink, doc, onToggleTask, busy }: MarkdownRendererProps) {
+/** Theme-independent renderer: CommonMark + GFM + Obsidian-flavoured extras (properties, wikilinks, callouts, tags, highlights). Raw HTML is never rendered as HTML. */
+export function MarkdownRenderer({ source, onOpenLink, onOpenWikilink, doc, onToggleTask, busy }: MarkdownRendererProps) {
+  const frontmatter = extractFrontmatter(source);
   return (
-    <RenderContext.Provider value={{ onOpenLink, doc, onToggleTask, busy }}>
+    <RenderContext.Provider value={{ onOpenLink, onOpenWikilink, doc, onToggleTask, busy }}>
       <div className="markdown">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+        {frontmatter !== null && <Properties yaml={frontmatter} />}
+        <ReactMarkdown remarkPlugins={[remarkFrontmatter, remarkGfm, remarkObsidian]} components={components}>
           {source}
         </ReactMarkdown>
       </div>

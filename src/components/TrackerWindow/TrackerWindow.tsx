@@ -38,6 +38,11 @@ export function TrackerWindow({ id }: { id: string }) {
   // AI edit: results land in the edit draft (never straight on disk); `aiUndo` holds earlier drafts.
   const [aiOpen, setAiOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
+  // Optional Obsidian handoff: the button only appears when the app is installed.
+  const [obsidianApp, setObsidianApp] = useState(false);
+  useEffect(() => {
+    api.obsidianStatus().then((s) => setObsidianApp(s.app_installed)).catch(() => {});
+  }, []);
   const [aiUndo, setAiUndo] = useState<string[]>([]);
   const [aiSelection, setAiSelection] = useState<{ start: number; end: number } | null>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
@@ -246,6 +251,9 @@ export function TrackerWindow({ id }: { id: string }) {
         <span className="title" data-tauri-drag-region>{info?.display_name ?? "…"}</span>
         <button className="btn" onClick={openAi} onMouseDown={(e) => e.preventDefault()} disabled={!snap || unavailable || busy || aiOpen} aria-label="Edit with AI">AI</button>
         <button className="btn" onClick={() => setAskOpen(true)} disabled={!snap || askOpen || aiOpen} aria-label="Ask AI about this file" title="Ask a question about this file">ASK</button>
+        {obsidianApp && (
+          <button className="btn" onClick={() => api.openInObsidian(id).catch((e) => setNotice(String(e)))} aria-label="Open in Obsidian" title="Open this file in Obsidian (it must be inside a vault)">OBS</button>
+        )}
         {!editing && (
           <button className="btn" onClick={startEdit} disabled={!snap || unavailable} aria-label="Edit Markdown source">EDIT</button>
         )}
@@ -322,6 +330,12 @@ export function TrackerWindow({ id }: { id: string }) {
               busy={busy || unavailable}
               onToggleTask={(t) => void toggle(t)}
               onOpenLink={(u) => void api.openExternal(u).catch((e) => setError(String(e)))}
+              onOpenWikilink={(t) =>
+                void api
+                  .openWikilink(id, t)
+                  .then((found) => setNotice(found ? null : `No note named "${t.split("#")[0].split("|")[0]}" was found in this vault or your watched folders.`))
+                  .catch((e) => setNotice(String(e)))
+              }
             />
           )
         )}

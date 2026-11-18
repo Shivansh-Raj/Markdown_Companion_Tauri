@@ -1,6 +1,7 @@
 mod discovery;
 mod external;
 mod filesystem;
+mod obsidian;
 mod store;
 mod watcher;
 mod voice;
@@ -168,6 +169,58 @@ fn open_external(app: AppHandle, url: String) -> Result<(), String> {
         return Err("Blocked: only http, https and mailto links can be opened".into());
     }
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
+}
+
+/// Opens the note a `[[wikilink]]` points at in its own tracker window. Returns false when nothing matches.
+/// The search is limited to the linking note's vault (or folder) and the watched folders.
+#[tauri::command(async)]
+fn open_wikilink(app: AppHandle, id: String, target: String, store: State<Store>) -> Result<bool, String> {
+    let from = store.get(&id).ok_or("Unknown tracker")?;
+    let watched: Vec<std::path::PathBuf> = store.folders().iter().map(std::path::PathBuf::from).collect();
+    let Some(found) = discovery::resolve_wikilink(Path::new(&from.canonical_path), &watched, &target) else {
+        return Ok(false);
+    };
+    let file = store.register(&found.to_string_lossy())?;
+    open_tracker_impl(&app, &file.id)?;
+    Ok(true)
+}
+
+// ---- Optional Obsidian layer ----
+
+#[derive(Serialize)]
+struct ObsidianStatus {
+    app_installed: bool,
+    cli_path: Option<String>,
+}
+
+/// Looks for the app bundle and the CLI symlink on disk. It never runs the CLI (which would launch Obsidian).
+#[tauri::command]
+fn obsidian_status() -> ObsidianStatus {
+    ObsidianStatus {
+        app_installed: obsidian::app_installed(),
+        cli_path: obsidian::find_cli().map(|p| p.to_string_lossy().into_owned()),
+    }
+}
+
+/// Opens a tracked file in Obsidian via `obsidian://open?path=...`. The URI is built here from the stored path.
+#[tauri::command]
+fn open_in_obsidian(app: AppHandle, id: String, store: State<Store>) -> Result<(), String> {
+    if !obsidian::app_installed() {
+        return Err("Obsidian does not appear to be installed.".into());
+    }
+    let file = store.get(&id).ok_or_else(|| "Unknown tracker".to_string())?;
+    let uri = obsidian::open_uri(Path::new(&file.canonical_path));
+    app.opener().open_url(uri, None::<&str>).map_err(|e| e.to_string())
+}
+
+/// Appends text to today's daily note through the Obsidian CLI, so Obsidian's own daily-note settings decide where it goes.
+#[tauri::command]
+async fn obsidian_daily_append(content: String, heading: Option<String>) -> Result<String, String> {
+    let bin = obsidian::find_cli().ok_or_else(|| "The Obsidian command line is not set up (Obsidian Settings → General → Command line interface).".to_string())?;
+    let args = obsidian::daily_append_args(&content, heading.as_deref())?;
+    tauri::async_runtime::spawn_blocking(move || obsidian::run_cli(&bin, &args, obsidian::cli_timeout()))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 // ---- AI file creation ----
@@ -480,6 +533,10 @@ pub fn run() {
             hide_launcher,
             open_voice,
             open_external,
+            open_wikilink,
+            obsidian_status,
+            open_in_obsidian,
+            obsidian_daily_append,
             launcher_info,
             get_settings,
             set_settings,

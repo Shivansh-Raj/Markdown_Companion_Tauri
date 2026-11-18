@@ -13,6 +13,11 @@ export const api = {
   saveTrackerContent: (id: string, expectedHash: string, content: string) =>
     invoke<FileSnapshot>("save_tracker_content", { id, expectedHash, content }),
   trackerInfo: (id: string) => invoke<TrackedFile>("tracker_info", { id }),
+  obsidianStatus: () => invoke<{ app_installed: boolean; cli_path: string | null }>("obsidian_status"),
+  openWikilink: (id: string, target: string) => invoke<boolean>("open_wikilink", { id, target }),
+  openInObsidian: (id: string) => invoke<void>("open_in_obsidian", { id }),
+  obsidianDailyAppend: (content: string, heading?: string) =>
+    invoke<string>("obsidian_daily_append", { content, heading: heading ?? null }),
   openExternal: (url: string) => invoke<void>("open_external", { url }),
   unregisterFile: (id: string) => invoke<void>("unregister_file", { id }),
   getSettings: () => invoke<Settings>("get_settings"),
