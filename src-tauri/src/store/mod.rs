@@ -2,6 +2,7 @@
 //! Markdown content is never stored here; files remain the source of truth.
 
 use serde::{Deserialize, Serialize};
+use crate::secrets::SecretStore;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -54,7 +55,8 @@ pub struct Data {
     pub files: Vec<TrackedFile>,
     pub settings: Settings,
     pub folders: Vec<String>,
-    /// Groq API key for AI file creation (stored locally in the app data file).
+    /// Legacy location of the Groq API key. The key now lives in the OS credential store; this is only read to
+    /// migrate old files, and is written only when no credential store is available (see `KeyStorage`).
     pub groq_api_key: Option<String>,
     /// Folder for AI-created files; `None` means Documents/MarkdownCompanion.
     pub ai_save_dir: Option<String>,
@@ -62,8 +64,24 @@ pub struct Data {
     next_id: u64,
 }
 
+/// Where the API key currently lives.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "kind", content = "warning", rename_all = "lowercase")]
+pub enum KeyStorage {
+    /// No key saved.
+    None,
+    /// In the OS credential store.
+    Keychain,
+    /// In the app data file, because the credential store could not be used. Carries the reason.
+    File(String),
+}
+
 struct Inner {
     path: PathBuf,
+    secrets: Arc<dyn SecretStore>,
+    /// `None` = not read yet; `Some(None)` = read, no key.
+    key_cache: Mutex<Option<Option<String>>>,
+    key_storage: Mutex<KeyStorage>,
     data: Mutex<Data>,
     write_lock: Mutex<()>,
     save_pending: AtomicBool,
@@ -95,16 +113,48 @@ fn now() -> u64 {
 
 impl Store {
     pub fn load(path: PathBuf) -> Self {
+        #[cfg(test)]
+        let secrets: Arc<dyn SecretStore> = Arc::new(crate::secrets::MemorySecrets::default());
+        #[cfg(not(test))]
+        let secrets: Arc<dyn SecretStore> = Arc::new(crate::secrets::Keychain::new());
+        Self::load_with(path, secrets)
+    }
+
+    pub fn load_with(path: PathBuf, secrets: Arc<dyn SecretStore>) -> Self {
         let data = std::fs::read_to_string(&path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
-        Self(Arc::new(Inner {
+        let store = Self(Arc::new(Inner {
             path,
+            secrets,
+            key_cache: Mutex::new(None),
+            key_storage: Mutex::new(KeyStorage::None),
             data: Mutex::new(data),
             write_lock: Mutex::new(()),
             save_pending: AtomicBool::new(false),
-        }))
+        }));
+        store.migrate_key();
+        store
+    }
+
+    /// Moves a key left in the app data file by an older version into the credential store, then removes it from
+    /// the file. The file is only changed after the credential store returned the same value.
+    fn migrate_key(&self) {
+        let Some(key) = self.0.data.lock().unwrap().groq_api_key.clone() else { return };
+        let stored = self.0.secrets.set(&key).and_then(|()| match self.0.secrets.get() {
+            Ok(Some(v)) if v == key => Ok(()),
+            Ok(_) => Err("the credential store did not return the saved key".to_string()),
+            Err(e) => Err(e),
+        });
+        *self.0.key_cache.lock().unwrap() = Some(Some(key));
+        match stored {
+            Ok(()) => {
+                *self.0.key_storage.lock().unwrap() = KeyStorage::Keychain;
+                let _ = self.update(|d| d.groq_api_key = None);
+            }
+            Err(why) => *self.0.key_storage.lock().unwrap() = KeyStorage::File(why),
+        }
     }
 
     /// Applies `f` and persists immediately.
@@ -236,13 +286,56 @@ impl Store {
 
     // ---- AI ----
 
+    /// The saved key. Read from the credential store once and kept in memory, because every AI call asks for it.
     pub fn groq_api_key(&self) -> Option<String> {
-        self.0.data.lock().unwrap().groq_api_key.clone()
+        if let Some(cached) = self.0.key_cache.lock().unwrap().clone() {
+            return cached;
+        }
+        let from_file = self.0.data.lock().unwrap().groq_api_key.clone();
+        let (key, storage) = match self.0.secrets.get() {
+            Ok(Some(k)) => (Some(k), KeyStorage::Keychain),
+            Ok(None) => (from_file.clone(), if from_file.is_some() { KeyStorage::File("not in the credential store".into()) } else { KeyStorage::None }),
+            Err(e) => (from_file.clone(), if from_file.is_some() { KeyStorage::File(e) } else { KeyStorage::None }),
+        };
+        *self.0.key_storage.lock().unwrap() = storage;
+        *self.0.key_cache.lock().unwrap() = Some(key.clone());
+        key
     }
 
-    pub fn set_groq_api_key(&self, key: &str) -> Result<(), String> {
+    /// Where the key is stored; `File` means it is unprotected and carries the reason.
+    pub fn key_storage(&self) -> KeyStorage {
+        let _ = self.groq_api_key();
+        self.0.key_storage.lock().unwrap().clone()
+    }
+
+    /// Saves the key in the credential store. If that fails the key is kept in the app data file instead, so the
+    /// feature still works, and the returned storage says so. An empty key removes it from both places.
+    pub fn set_groq_api_key(&self, key: &str) -> Result<KeyStorage, String> {
         let key = key.trim();
-        self.update(|data| data.groq_api_key = if key.is_empty() { None } else { Some(key.to_string()) })
+        let storage = if key.is_empty() {
+            self.0.secrets.delete().map_err(|e| format!("Could not remove the key from the credential store: {e}"))?;
+            self.update(|d| d.groq_api_key = None)?;
+            KeyStorage::None
+        } else {
+            let saved = self.0.secrets.set(key).and_then(|()| match self.0.secrets.get() {
+                Ok(Some(v)) if v == key => Ok(()),
+                Ok(_) => Err("the credential store did not return the saved key".to_string()),
+                Err(e) => Err(e),
+            });
+            match saved {
+                Ok(()) => {
+                    self.update(|d| d.groq_api_key = None)?;
+                    KeyStorage::Keychain
+                }
+                Err(why) => {
+                    self.update(|d| d.groq_api_key = Some(key.to_string()))?;
+                    KeyStorage::File(why)
+                }
+            }
+        };
+        *self.0.key_cache.lock().unwrap() = Some((!key.is_empty()).then(|| key.to_string()));
+        *self.0.key_storage.lock().unwrap() = storage.clone();
+        Ok(storage)
     }
 
     pub fn ai_save_dir(&self) -> Option<String> {
@@ -444,5 +537,95 @@ mod tests {
         assert!(store.add_folder("/").is_err());
         store.remove_folder(&a).unwrap();
         assert!(store.folders().is_empty());
+    }
+
+    // ---- API key storage ----
+
+    fn key_dir(name: &str) -> PathBuf {
+        let d = temp_dir(name);
+        let _ = std::fs::remove_file(d.join("store.json"));
+        d
+    }
+
+    fn secrets() -> Arc<crate::secrets::MemorySecrets> {
+        Arc::new(crate::secrets::MemorySecrets::default())
+    }
+
+    fn file_text(dir: &Path) -> String {
+        std::fs::read_to_string(dir.join("store.json")).unwrap_or_default()
+    }
+
+    #[test]
+    fn an_old_plaintext_key_moves_to_the_credential_store_and_leaves_the_file() {
+        let dir = key_dir("key-migrate");
+        std::fs::write(dir.join("store.json"), r#"{"groq_api_key":"gsk_old_secret","folders":[]}"#).unwrap();
+        let sec = secrets();
+        let store = Store::load_with(dir.join("store.json"), sec.clone());
+        assert_eq!(store.groq_api_key().as_deref(), Some("gsk_old_secret"));
+        assert_eq!(store.key_storage(), KeyStorage::Keychain);
+        assert_eq!(sec.get().unwrap().as_deref(), Some("gsk_old_secret"));
+        assert!(!file_text(&dir).contains("gsk_old_secret"), "key must be gone from store.json");
+        // a fresh start reads it from the credential store
+        let again = Store::load_with(dir.join("store.json"), sec);
+        assert_eq!(again.groq_api_key().as_deref(), Some("gsk_old_secret"));
+    }
+
+    #[test]
+    fn if_migration_fails_the_key_stays_usable_and_the_file_copy_is_kept() {
+        let dir = key_dir("key-migrate-fail");
+        std::fs::write(dir.join("store.json"), r#"{"groq_api_key":"gsk_keep"}"#).unwrap();
+        let sec = secrets();
+        sec.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+        let store = Store::load_with(dir.join("store.json"), sec);
+        assert_eq!(store.groq_api_key().as_deref(), Some("gsk_keep"));
+        assert!(matches!(store.key_storage(), KeyStorage::File(_)));
+        assert!(file_text(&dir).contains("gsk_keep"));
+    }
+
+    #[test]
+    fn saving_a_key_uses_the_credential_store_and_never_the_file() {
+        let dir = key_dir("key-save");
+        let sec = secrets();
+        let store = Store::load_with(dir.join("store.json"), sec.clone());
+        assert_eq!(store.key_storage(), KeyStorage::None);
+        assert_eq!(store.set_groq_api_key("  gsk_new  ").unwrap(), KeyStorage::Keychain);
+        assert_eq!(store.groq_api_key().as_deref(), Some("gsk_new"));
+        assert_eq!(sec.get().unwrap().as_deref(), Some("gsk_new"));
+        assert!(!file_text(&dir).contains("gsk_new"));
+    }
+
+    #[test]
+    fn saving_falls_back_to_the_file_with_a_reason_when_the_credential_store_fails() {
+        let dir = key_dir("key-fallback");
+        let sec = secrets();
+        sec.fail.store(true, std::sync::atomic::Ordering::SeqCst);
+        let store = Store::load_with(dir.join("store.json"), sec.clone());
+        let storage = store.set_groq_api_key("gsk_fb").unwrap();
+        assert_eq!(storage, KeyStorage::File("keychain locked".into()));
+        assert_eq!(store.groq_api_key().as_deref(), Some("gsk_fb"));
+        assert!(file_text(&dir).contains("gsk_fb"));
+        // once the credential store works again, saving the key moves it out of the file
+        sec.fail.store(false, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(store.set_groq_api_key("gsk_fb").unwrap(), KeyStorage::Keychain);
+        assert!(!file_text(&dir).contains("gsk_fb"));
+    }
+
+    #[test]
+    fn an_empty_key_removes_it_everywhere() {
+        let dir = key_dir("key-remove");
+        let sec = secrets();
+        let store = Store::load_with(dir.join("store.json"), sec.clone());
+        store.set_groq_api_key("gsk_x").unwrap();
+        assert_eq!(store.set_groq_api_key("  ").unwrap(), KeyStorage::None);
+        assert_eq!(store.groq_api_key(), None);
+        assert_eq!(sec.get().unwrap(), None);
+        assert_eq!(Store::load_with(dir.join("store.json"), sec).groq_api_key(), None);
+    }
+
+    #[test]
+    fn key_storage_serialises_for_the_settings_screen() {
+        assert_eq!(serde_json::to_string(&KeyStorage::Keychain).unwrap(), r#"{"kind":"keychain"}"#);
+        assert_eq!(serde_json::to_string(&KeyStorage::None).unwrap(), r#"{"kind":"none"}"#);
+        assert_eq!(serde_json::to_string(&KeyStorage::File("why".into())).unwrap(), r#"{"kind":"file","warning":"why"}"#);
     }
 }

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { SessionMeta, VoiceDevice, VoiceMode, VoiceStatus } from "./voice/types";
-import type { DiscoveredFile, FileEntry, FileSnapshot, LauncherInfo, NoteContext, Settings, TrackedFile } from "../types";
+import type { DiscoveredFile, FileEntry, FileSnapshot, KeyStorage, LauncherInfo, NoteContext, Settings, TrackedFile } from "../types";
 
 export const api = {
   listFiles: () => invoke<FileEntry[]>("list_files"),
@@ -31,7 +31,8 @@ export const api = {
   removeFolder: (path: string) => invoke<void>("remove_folder", { path }),
   listDiscovered: () => invoke<DiscoveredFile[]>("list_discovered"),
   getGroqKey: () => invoke<string | null>("get_groq_key"),
-  setGroqKey: (key: string) => invoke<void>("set_groq_key", { key }),
+  setGroqKey: (key: string) => invoke<KeyStorage>("set_groq_key", { key }),
+  groqKeyStorage: () => invoke<KeyStorage>("groq_key_storage"),
   createMarkdownFile: (name: string, content: string) =>
     invoke<TrackedFile>("create_markdown_file", { name, content }),
   getSaveDir: () => invoke<string>("get_save_dir"),

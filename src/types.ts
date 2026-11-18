@@ -63,3 +63,6 @@ export interface NoteContext {
   backlinks: NoteRef[];
   outgoing: { label: string; target: NoteRef | null }[];
 }
+
+/** Where the Groq key is stored. `file` means it is unprotected in the app data file; `warning` says why. */
+export type KeyStorage = { kind: "none" } | { kind: "keychain" } | { kind: "file"; warning: string };

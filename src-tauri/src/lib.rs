@@ -2,6 +2,7 @@ mod discovery;
 mod external;
 mod filesystem;
 mod obsidian;
+mod secrets;
 mod store;
 mod vault;
 mod watcher;
@@ -320,7 +321,12 @@ fn get_groq_key(store: State<Store>) -> Option<String> {
 }
 
 #[tauri::command]
-fn set_groq_key(key: String, store: State<Store>) -> Result<(), String> {
+fn groq_key_storage(store: State<Store>) -> store::KeyStorage {
+    store.key_storage()
+}
+
+#[tauri::command]
+fn set_groq_key(key: String, store: State<Store>) -> Result<store::KeyStorage, String> {
     store.set_groq_api_key(&key)
 }
 
@@ -638,6 +644,7 @@ pub fn run() {
             remove_folder,
             list_discovered,
             get_groq_key,
+            groq_key_storage,
             set_groq_key,
             create_markdown_file,
             create_markdown_file_in,

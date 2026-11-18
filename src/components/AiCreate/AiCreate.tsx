@@ -43,11 +43,15 @@ export function AiCreate({ onBack, onCreated }: { onBack: () => void; onCreated:
 
   const saveKey = async () => {
     try {
-      await api.setGroqKey(keyDraft);
+      const storage = await api.setGroqKey(keyDraft);
       setApiKey(keyDraft.trim() || null);
       setKeyDraft("");
       setEditingKey(false);
-      setError(null);
+      setError(
+        storage.kind === "file"
+          ? `The key works but could not go into the secure credential store (${storage.warning}), so it is saved unprotected in the app's data file.`
+          : null,
+      );
     } catch (e) {
       setError(String(e));
     }

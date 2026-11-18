@@ -5,7 +5,7 @@ import { acceleratorFromEvent, prettyAccelerator } from "../../services/accelera
 import { THEME_OPTIONS } from "../../services/themeContext";
 import { testKey } from "../../services/ai";
 import { animationsEnabled, setAnimationsEnabled } from "../../services/animations";
-import type { Settings as SettingsModel, ThemeName } from "../../types";
+import type { KeyStorage, Settings as SettingsModel, ThemeName } from "../../types";
 
 const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
 
@@ -17,11 +17,13 @@ export function Settings({ onBack, onChanged }: { onBack: () => void; onChanged:
   const [hasKey, setHasKey] = useState(false);
   const [keyDraft, setKeyDraft] = useState("");
   const [keyMsg, setKeyMsg] = useState<string | null>(null);
+  const [keyStorage, setKeyStorage] = useState<KeyStorage>({ kind: "none" });
   const [saveDir, setSaveDir] = useState("");
   const [anim, setAnim] = useState(animationsEnabled());
 
   useEffect(() => {
     api.getGroqKey().then((k) => setHasKey(!!k)).catch(() => {});
+    api.groqKeyStorage().then(setKeyStorage).catch(() => {});
     api.getSaveDir().then(setSaveDir).catch(() => {});
     api.getSettings().then(setSettings).catch((e) => setError(String(e)));
     api.listFolders().then(setFolders).catch((e) => setError(String(e)));
@@ -56,7 +58,8 @@ export function Settings({ onBack, onChanged }: { onBack: () => void; onChanged:
 
   const saveKey = async (value: string) => {
     try {
-      await api.setGroqKey(value);
+      const storage = await api.setGroqKey(value);
+      setKeyStorage(storage);
       setHasKey(!!value.trim());
       setKeyDraft("");
       setKeyMsg(value.trim() ? "Key saved." : "Key removed.");
@@ -179,7 +182,16 @@ export function Settings({ onBack, onChanged }: { onBack: () => void; onChanged:
         {hasKey && <button className="btn" onClick={() => void saveKey("")}>REMOVE</button>}
       </div>
       {keyMsg && <p className="note" role="status">{keyMsg}</p>}
-      <p className="note">Stored only on this computer and sent only to api.groq.com.</p>
+      {keyStorage.kind === "keychain" && (
+        <p className="note">Stored in your system's secure credential store and sent only to api.groq.com.</p>
+      )}
+      {keyStorage.kind === "file" && (
+        <p className="error" role="alert">
+          The secure credential store could not be used ({keyStorage.warning}), so the key is saved unprotected in the app's data file. Press SAVE
+          again later to move it.
+        </p>
+      )}
+      {keyStorage.kind === "none" && <p className="note">Saved in your system's secure credential store and sent only to api.groq.com.</p>}
       <h2>AI FILES SAVE TO</h2>
       <div className="folder">
         <span title={saveDir}>{saveDir}</span>
