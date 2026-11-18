@@ -45,7 +45,10 @@ body { background: transparent; color: var(--ink); font: 14px/1.45 var(--body); 
   background: var(--accent); color: var(--accent-ink);
   border-bottom: 3px solid var(--border); user-select: none;
 }
-.title { flex: 1; font-family: var(--pixel); font-weight: 700; font-size: 13px; letter-spacing: .5px;
+/* Tracker title bars carry six buttons; keep them compact so the file name stays readable. */
+.tracker .titlebar { gap: 4px; padding: 6px; }
+.tracker .titlebar .btn { font-size: 11px; padding: 2px 5px; }
+.title { flex: 1; min-width: 40px; font-family: var(--pixel); font-weight: 700; font-size: 13px; letter-spacing: .5px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btn {
   font-family: var(--pixel); font-size: 12px; cursor: pointer; color: var(--ink);

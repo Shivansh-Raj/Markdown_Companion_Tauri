@@ -254,16 +254,18 @@ export function TrackerWindow({ id }: { id: string }) {
         <button className="btn" onClick={openAi} onMouseDown={(e) => e.preventDefault()} disabled={!snap || unavailable || busy || aiOpen} aria-label="Edit with AI">AI</button>
         <button className="btn" onClick={() => setAskOpen(true)} disabled={!snap || askOpen || aiOpen} aria-label="Ask AI about this file" title="Ask a question about this file">ASK</button>
         <button className="btn" onClick={() => setCtxOpen((o) => !o)} disabled={!snap} aria-pressed={ctxOpen} aria-label="Show linked notes" title="Backlinks, links and tags">LINKS</button>
-        {obsidianApp && (
-          <button className="btn" onClick={() => api.openInObsidian(id).catch((e) => setNotice(String(e)))} aria-label="Open in Obsidian" title="Open this file in Obsidian (it must be inside a vault)">OBS</button>
-        )}
         {!editing && (
           <button className="btn" onClick={startEdit} disabled={!snap || unavailable} aria-label="Edit Markdown source">EDIT</button>
         )}
         <button className="btn" onClick={() => void win.hide()} aria-label="Hide tracker">–</button>
         <button className="btn" onClick={() => void win.close()} aria-label="Close tracker">✕</button>
       </div>
-      {ctxOpen && !editing && !aiOpen && !askOpen && <ContextPanel id={id} refreshKey={snap?.hash ?? ""} onClose={() => setCtxOpen(false)} />}
+      {ctxOpen && !editing && !aiOpen && !askOpen && <ContextPanel
+          id={id}
+          refreshKey={snap?.hash ?? ""}
+          onClose={() => setCtxOpen(false)}
+          onOpenInObsidian={obsidianApp ? () => api.openInObsidian(id).catch((e) => setNotice(String(e))) : undefined}
+        />}
       {!editing && !aiOpen && !askOpen && doc && doc.total > 0 && <ProgressBar done={doc.done} total={doc.total} />}
       {unavailable && (
         <div className="error" role="alert">

@@ -91,6 +91,7 @@ export function ReceiptDialog({ reqs, onSend, onCancel }: { reqs: ReceiptRequest
         <p className="receipt-lead">
           {purposes.join(" · ")}. This text leaves your computer and goes to <strong>{DESTINATION}</strong>. Nothing else is sent.
         </p>
+        <div className="receipt-body">
         <div className="receipt-items">
           {items.map((i, n) => (
             <div className="receipt-item" key={`${i.label}-${n}`}>
@@ -127,6 +128,7 @@ export function ReceiptDialog({ reqs, onSend, onCancel }: { reqs: ReceiptRequest
         <label className="receipt-remember">
           <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} /> Don't ask again for this unchanged text while the app is open
         </label>
+        </div>
         <div className="receipt-actions">
           <button ref={sendRef} className="btn primary" onClick={() => onSend(remember)}>SEND</button>
           <button className="btn" onClick={onCancel}>CANCEL</button>

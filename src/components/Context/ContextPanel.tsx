@@ -13,7 +13,7 @@ function NoteButton({ n, onOpen, suffix }: { n: NoteRef; onOpen: (n: NoteRef) =>
 }
 
 /** Backlinks, outgoing links and tags for the open note, read from a local index of its vault or watched folder. */
-export function ContextPanel({ id, refreshKey, onClose }: { id: string; refreshKey: string; onClose: () => void }) {
+export function ContextPanel({ id, refreshKey, onClose, onOpenInObsidian }: { id: string; refreshKey: string; onClose: () => void; onOpenInObsidian?: () => void }) {
   const [ctx, setCtx] = useState<NoteContext | null | undefined>(undefined); // undefined = loading, null = not in a vault
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -36,6 +36,9 @@ export function ContextPanel({ id, refreshKey, onClose }: { id: string; refreshK
     <div className="ctx-panel" role="region" aria-label="Linked notes">
       <div className="ctx-head">
         <strong>{ctx ? `${ctx.is_vault ? "VAULT" : "FOLDER"}: ${ctx.vault_name}` : "LINKED NOTES"}</strong>
+        {onOpenInObsidian && (
+          <button className="btn" onClick={onOpenInObsidian} title="Open this note in Obsidian (it must be inside a vault)">OBSIDIAN</button>
+        )}
         <button className="btn" onClick={() => setTick((t) => t + 1)} aria-label="Refresh links">↻</button>
         <button className="btn" onClick={onClose} aria-label="Close linked notes">✕</button>
       </div>

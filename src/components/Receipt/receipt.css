@@ -1,12 +1,15 @@
-.receipt-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, .55); display: flex; align-items: stretch; justify-content: center; padding: 6px; }
-.receipt { background: var(--surface); color: var(--ink); border: 3px solid var(--border); padding: 10px; width: 100%; max-width: 640px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; font-size: 12px; }
-.receipt-title { margin: 0; font-family: var(--pixel); font-size: 13px; color: var(--accent); }
-.receipt-lead, .receipt-total { margin: 0; }
+.receipt-overlay { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, .55); display: flex; justify-content: center; padding: 6px; box-sizing: border-box; }
+.receipt { background: var(--surface); color: var(--ink); border: 3px solid var(--border); padding: 10px; width: 100%; max-width: 640px; box-sizing: border-box; min-width: 0; display: flex; flex-direction: column; gap: 8px; overflow: hidden; font-size: 12px; }
+.receipt-title { margin: 0; font-family: var(--pixel); font-size: 13px; color: var(--accent); flex: none; }
+.receipt-lead { margin: 0; flex: none; }
+/* Only the middle scrolls, so the heading and the SEND / CANCEL buttons are always in view, even in a small window. */
+.receipt-body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.receipt-total { margin: 0; }
 .receipt-items { display: flex; flex-direction: column; gap: 8px; }
-.receipt-item { border: 2px solid var(--border); padding: 6px; }
+.receipt-item { border: 2px solid var(--border); padding: 6px; min-width: 0; }
 .receipt-item-head { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .receipt-item-head span, .receipt-note { color: var(--muted); }
-.receipt-text { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.45 ui-monospace, Menlo, Consolas, monospace; background: var(--code-bg); padding: 4px 6px; max-height: 220px; overflow-y: auto; }
+.receipt-text { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.45 ui-monospace, Menlo, Consolas, monospace; background: var(--code-bg); padding: 4px 6px; max-height: 160px; overflow-y: auto; }
 .receipt-exact summary, .receipt details summary { cursor: pointer; color: var(--accent); }
-.receipt-remember { display: flex; gap: 6px; align-items: center; }
-.receipt-actions { display: flex; gap: 6px; margin-top: auto; }
+.receipt-remember { display: flex; gap: 6px; align-items: flex-start; }
+.receipt-actions { display: flex; gap: 6px; flex: none; padding-top: 6px; border-top: 2px solid var(--border); }
