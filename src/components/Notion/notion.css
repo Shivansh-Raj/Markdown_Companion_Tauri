@@ -17,3 +17,5 @@
 .notion-map-row span { flex: 0 0 42%; min-width: 0; }
 .notion-map-row select { flex: 1; min-width: 0; }
 .notion-tasks { display: flex; flex-direction: column; gap: 4px; }
+.notion-hit-row { display: flex; gap: 6px; }
+.notion-hit-row .btn:first-child { flex: 1; }

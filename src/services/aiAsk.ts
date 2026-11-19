@@ -8,7 +8,7 @@ export const NOT_FOUND = "I couldn't find that in this file.";
 export interface Turn { question: string; answer: string }
 export interface Passage { path: string; rel: string; name: string; heading: string; text: string }
 /** A quote the AI gave. `passage` is the note it was found in (folder and vault questions only). */
-export interface Source { quote: string; verified: boolean; passage?: Passage }
+export interface Source { quote: string; verified: boolean; passage?: Passage; /** The section of the document the quote is in, when it falls inside one. */ heading?: string }
 export interface ParsedAnswer { answer: string; sources: Source[] }
 
 export function buildAskSystemPrompt(): string {
@@ -136,6 +136,24 @@ export function buildAskUserPrompt(question: string, history: Turn[], doc: strin
   return `${prior ? `Earlier in this conversation:\n${prior}\n\n` : ""}Document:\n"""\n${doc}\n"""\n\nQuestion: ${question}`;
 }
 
+/**
+ * The heading of the section a quote is in (the nearest `#` heading above it), or null when it is before any heading or spans
+ * two sections. Matching ignores case and punctuation, like the quote check itself.
+ */
+export function headingForQuote(doc: string, quote: string): string | null {
+  const sections: { heading: string | null; text: string[] }[] = [{ heading: null, text: [] }];
+  for (const line of doc.split("\n")) {
+    const h = /^#{1,6}\s+(.*?)\s*#*\s*$/.exec(line);
+    if (h) sections.push({ heading: h[1], text: [] });
+    else sections[sections.length - 1].text.push(line);
+  }
+  for (const s of sections) {
+    const squashed = s.text.join(" ").toLowerCase().replace(/[^\p{L}\p{N}\s']/gu, " ").replace(/\s+/g, " ").trim();
+    if (inTranscript(quote, squashed)) return s.heading;
+  }
+  return null;
+}
+
 /** Splits the reply into answer and sources, and marks which source quotes really appear in the file. */
 export function parseAskAnswer(raw: string, doc: string): ParsedAnswer {
   const idx = raw.search(/\n?\s*SOURCES:\s*/i);
@@ -150,6 +168,7 @@ export function parseAskAnswer(raw: string, doc: string): ParsedAnswer {
     sources.push({ quote, verified: inTranscript(quote, squashed) });
     if (sources.length === 3) break;
   }
+  for (const src of sources) if (src.verified) src.heading = headingForQuote(doc, src.quote) ?? undefined;
   return { answer, sources };
 }
 

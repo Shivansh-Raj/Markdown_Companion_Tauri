@@ -37,3 +37,21 @@ describe("excerptForAsk", () => {
     expect(e.partial).toBe(true);
   });
 });
+
+import { headingForQuote, parseAskAnswer } from "./aiAsk";
+
+describe("quotes name their section", () => {
+  const doc = "# Plan\n\nIntro line.\n\n## Risks\n\nThe vendor may slip by two weeks.\n\n## Owners\n\nPriya owns the migration.\n";
+  it("finds the heading above a quote, ignoring case and punctuation", () => {
+    expect(headingForQuote(doc, "the vendor may slip by two weeks")).toBe("Risks");
+    expect(headingForQuote(doc, "Priya owns the migration")).toBe("Owners");
+    expect(headingForQuote(doc, "nothing like this")).toBeNull();
+  });
+
+  it("adds the heading to verified sources only", () => {
+    const p = parseAskAnswer('Priya.\n\nSOURCES:\n- "Priya owns the migration."\n- "invented quote that is not there"', doc);
+    expect(p.sources[0]).toMatchObject({ verified: true, heading: "Owners" });
+    expect(p.sources[1].verified).toBe(false);
+    expect(p.sources[1].heading).toBeUndefined();
+  });
+});

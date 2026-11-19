@@ -23,11 +23,12 @@ describe("ask the file", () => {
     const raw = 'The venue is not booked yet.\nSOURCES:\n- "Book the venue for March 14"\n- "Write the press release"\n- "The venue costs $5000"';
     const r = parseAskAnswer(raw, DOC);
     expect(r.answer).toBe("The venue is not booked yet.");
-    expect(r.sources).toEqual([
+    expect(r.sources.map(({ quote, verified }) => ({ quote, verified }))).toEqual([
       { quote: "Book the venue for March 14", verified: true },
       { quote: "Write the press release", verified: true },
       { quote: "The venue costs $5000", verified: false },
     ]);
+    expect(r.sources[2]).not.toHaveProperty("heading"); // only quotes found in the file name a section
   });
 
   it("handles replies without sources and recognises the not-found answer", () => {

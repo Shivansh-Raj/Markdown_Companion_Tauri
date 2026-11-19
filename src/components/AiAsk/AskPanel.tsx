@@ -26,7 +26,7 @@ type Scope = "note" | "folder" | "vault";
 const EXAMPLES = ["What is still left to do?", "Summarise this file in three bullets.", "What is due soonest?"];
 
 /** Ask a question about the open file; the answer comes only from the file, with quotes you can check. */
-export function AskPanel({ noteId, content, fileName, onClose }: { noteId?: string; content: string; fileName: string; onClose: () => void }) {
+export function AskPanel({ noteId, content, fileName, onClose, notionPage = false, notice }: { noteId?: string; content: string; fileName: string; onClose: () => void; notionPage?: boolean; notice?: string }) {
   const [scopes, setScopes] = useState<AskScopes | null>(null);
   const [scope, setScope] = useState<Scope>("note");
   const [excluded, setExcluded] = useState(0);
@@ -73,7 +73,7 @@ export function AskPanel({ noteId, content, fileName, onClose }: { noteId?: stri
       setPartial(note ?? null);
       system = buildAskSystemPrompt();
       user = buildAskUserPrompt(text, turns, doc);
-      reqItems = [{ label: `${fileName}${ex.partial ? " (the most relevant parts)" : " (whole file)"}`, text: doc, note }];
+      reqItems = [{ label: `${fileName}${ex.partial ? " (the most relevant parts)" : notionPage ? " (whole Notion page)" : " (whole file)"}`, text: doc, note }];
     } else {
       // Retrieval happens on this computer. Nothing is sent until the receipt below is approved.
       let found;
@@ -96,7 +96,8 @@ export function AskPanel({ noteId, content, fileName, onClose }: { noteId?: stri
     }
     const approved = await approve([{
       purpose: scope === "note" || !noteId ? `Ask about ${fileName}` : `Ask ${where}`, system, user, mode: "review",
-      openFile: scope === "note" || !noteId,
+      // A Notion page is other people's workspace content, so its text always goes through the review dialog.
+      openFile: (scope === "note" || !noteId) && !notionPage,
       items: [
         ...reqItems,
         ...(turns.length ? [{ label: "Earlier answers in this chat", text: askHistoryText(turns) }] : []),
@@ -160,10 +161,13 @@ export function AskPanel({ noteId, content, fileName, onClose }: { noteId?: stri
       )}
       <p className="note">
         {scope === "note"
-          ? "Answers come only from this file. Quotes below each answer are checked against the file."
+          ? notionPage
+            ? "Answers come only from this Notion page. You review exactly what is sent first. Quotes below each answer are checked against the page and name their section."
+            : "Answers come only from this file. Quotes below each answer are checked against the file."
           : "Only the passages that best match your question are sent, and you review them first. Quotes are checked against those passages and name their note."}
         {scope !== "note" && excluded > 0 && ` ${excluded} note${excluded === 1 ? " is" : "s are"} never sent (marked ai: false).`}
       </p>
+      {notice && <div className="error" role="status">{notice}</div>}
       {scope === "note" && partial && <div className="error" role="status">{partial}</div>}
 
       <div className="ask-log" ref={scroller} aria-live="polite">
@@ -176,7 +180,7 @@ export function AskPanel({ noteId, content, fileName, onClose }: { noteId?: stri
           <div key={i} className="ask-turn">
             <p className="ask-q"><span className="voice-tag">YOU</span> {it.question}</p>
             <div className={it.error ? "ask-a error" : "ask-a"}>
-              <span className="voice-tag">{it.scoped ? "NOTES SAY" : "FILE SAYS"}</span>
+              <span className="voice-tag">{it.scoped ? "NOTES SAY" : notionPage ? "PAGE SAYS" : "FILE SAYS"}</span>
               {it.error ? <p>{it.answer}</p> : <Answer text={it.answer} />}
             </div>
             {!it.error && !isNotFound(it.answer) && (
@@ -185,6 +189,7 @@ export function AskPanel({ noteId, content, fileName, onClose }: { noteId?: stri
                   {it.sources.filter((s) => s.verified).map((s) => (
                     <li key={s.quote}>
                       “{s.quote}”
+                      {s.heading && <span className="note"> › {s.heading}</span>}
                       {s.passage && noteId && (
                         <>
                           {" "}
