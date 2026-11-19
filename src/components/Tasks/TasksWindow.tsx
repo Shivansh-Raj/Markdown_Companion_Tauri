@@ -4,6 +4,7 @@ import { api } from "../../services/api";
 import { GROUP_LABELS, groupTasks, localDate, plainTitle, shortDate } from "../../services/tasks";
 import type { TaskRow, TasksView } from "../../types";
 import { TaskCheckbox } from "../TaskCheckbox/TaskCheckbox";
+import { NotionTasksPane } from "./NotionTasksPane";
 import "./tasks.css";
 
 const REFRESH_MS = 5000;
@@ -23,6 +24,13 @@ export function TasksWindow() {
   const busyRef = useRef(false);
   const undoTimer = useRef<number | undefined>(undefined);
   const win = getCurrentWindow();
+  // A second tab with the Notion Tasks database, when Notion is connected and a Tasks database is set up.
+  const [tab, setTab] = useState<"notes" | "notion">("notes");
+  const [notionTasks, setNotionTasks] = useState(false);
+  const [reloadTick, setReloadTick] = useState(0);
+  useEffect(() => {
+    Promise.all([api.notionConnected(), api.notionDestination("tasks")]).then(([c, d]) => setNotionTasks(c && d !== null)).catch(() => {});
+  }, []);
 
   const load = useCallback(async () => {
     if (busyRef.current) return;
@@ -81,12 +89,19 @@ export function TasksWindow() {
     <div className="tracker tasks-window">
       <div className="titlebar" data-tauri-drag-region>
         <span className="title" data-tauri-drag-region>
-          OPEN TASKS{view ? ` (${view.rows.length}${view.truncated ? "+" : ""})` : ""}
+          OPEN TASKS{tab === "notes" && view ? ` (${view.rows.length}${view.truncated ? "+" : ""})` : ""}
         </span>
-        <button className="btn" onClick={() => void load()} aria-label="Refresh tasks" title="Refresh">↻</button>
+        <button className="btn" onClick={() => { void load(); setReloadTick((t) => t + 1); }} aria-label="Refresh tasks" title="Refresh">↻</button>
         <button className="btn" onClick={() => void win.hide()} aria-label="Hide tasks window">–</button>
         <button className="btn" onClick={() => void win.close()} aria-label="Close tasks window">✕</button>
       </div>
+      {notionTasks && (
+        <div className="tasks-tabs" role="tablist" aria-label="Task source">
+          <button className={tab === "notes" ? "btn primary" : "btn"} role="tab" aria-selected={tab === "notes"} onClick={() => setTab("notes")}>NOTES</button>
+          <button className={tab === "notion" ? "btn primary" : "btn"} role="tab" aria-selected={tab === "notion"} onClick={() => setTab("notion")}>NOTION</button>
+        </div>
+      )}
+      {tab === "notion" && notionTasks ? <NotionTasksPane reloadTick={reloadTick} /> : <>
       <div className="tasks-tools">
         <input className="search tasks-search" placeholder="Filter tasks or notes" aria-label="Filter tasks" value={query} onChange={(e) => setQuery(e.target.value)} />
         {overdue > 0 && <span className="tasks-overdue" role="status">{overdue} overdue</span>}
@@ -138,6 +153,7 @@ export function TasksWindow() {
           <button className="btn" onClick={() => void toggle(undo.row, false)} disabled={busy}>UNDO</button>
         </div>
       )}
+      </>}
     </div>
   );
 }

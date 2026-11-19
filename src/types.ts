@@ -128,3 +128,5 @@ export interface NotionDestination { data_source_id: string; title: string; mapp
 export interface NotionRowPreview { database: string; properties: Record<string, unknown>; warnings: string[] }
 export interface NotionRowCreated { id: string; url: string; warnings: string[]; linked: boolean }
 export interface NotionTemplate { title: string; columns: [string, string][] }
+export interface NotionTask { id: string; title: string; due: string | null; status: string | null; owner: string | null; url: string }
+export interface NotionTasksView { database: string; rows: NotionTask[]; truncated: boolean; done_status: string | null; read_only_reason: string | null }

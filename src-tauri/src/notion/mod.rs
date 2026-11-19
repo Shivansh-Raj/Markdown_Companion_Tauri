@@ -13,6 +13,7 @@ pub mod db;
 pub mod dest;
 pub mod edit;
 pub mod home;
+pub mod tasks;
 pub mod sync;
 
 use crate::secrets::SecretStore;
@@ -191,6 +192,37 @@ impl<'a> Client<'a> {
                     .collect()
             })
             .unwrap_or_default())
+    }
+
+    /// One page of rows from a database. Returns the rows, the cursor for the next page, and whether Notion says the
+    /// result is incomplete (it caps a query at 10,000 rows).
+    pub fn query_data_source(&self, ds: &str, filter: Option<Value>, cursor: Option<&str>) -> Result<(Vec<Value>, Option<String>, bool), String> {
+        let id = parse_page_id(ds).ok_or("That is not a Notion database link or id.")?;
+        let mut body = json!({ "page_size": 100 });
+        if let Some(f) = filter {
+            body["filter"] = f;
+        }
+        if let Some(c) = cursor {
+            body["start_cursor"] = json!(c);
+        }
+        let v = self.call("POST", &format!("/v1/data_sources/{id}/query"), Some(body))?;
+        let rows = v.get("results").and_then(Value::as_array).cloned().unwrap_or_default();
+        let next = if v.get("has_more").and_then(Value::as_bool) == Some(true) { v.get("next_cursor").and_then(Value::as_str).map(str::to_string) } else { None };
+        let incomplete = v.pointer("/request_status/type").and_then(Value::as_str) == Some("incomplete");
+        Ok((rows, next, incomplete))
+    }
+
+    /// The whole page object (properties, parent, trash flag).
+    pub fn get_page(&self, page: &str) -> Result<Value, String> {
+        let id = parse_page_id(page).ok_or("That is not a Notion page link or id.")?;
+        self.call("GET", &format!("/v1/pages/{id}"), None)
+    }
+
+    /// Changes only the properties given; every other property and the page's content are left alone.
+    pub fn update_properties(&self, page: &str, properties: Value) -> Result<(), String> {
+        let id = parse_page_id(page).ok_or("That is not a Notion page link or id.")?;
+        self.call("PATCH", &format!("/v1/pages/{id}"), Some(json!({ "properties": properties })))?;
+        Ok(())
     }
 
     /// A database's current properties, limited to the ones MC can write.

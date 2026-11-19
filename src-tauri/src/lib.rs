@@ -708,6 +708,29 @@ async fn notion_create_row(
     .await
 }
 
+/// Open tasks from the Tasks database. Read only.
+#[tauri::command]
+async fn notion_tasks(
+    state: State<'_, std::sync::Arc<notion::NotionState>>,
+    store: State<'_, Store>,
+) -> Result<notion::tasks::NotionTasksView, String> {
+    let st = store.inner().clone();
+    notion_call(state.inner(), move |c| notion::tasks::open_tasks(c, &st)).await
+}
+
+/// Sets a task's Status after checking it still has the status the user saw. Used to tick a task off and to undo that.
+#[tauri::command]
+async fn notion_task_set_status(
+    page: String,
+    expect: Option<String>,
+    to: String,
+    state: State<'_, std::sync::Arc<notion::NotionState>>,
+    store: State<'_, Store>,
+) -> Result<notion::tasks::StatusOutcome, String> {
+    let st = store.inner().clone();
+    notion_call(state.inner(), move |c| notion::tasks::set_status(c, &st, &page, expect.as_deref(), &to)).await
+}
+
 #[tauri::command]
 fn notion_home(store: State<Store>) -> Option<store::NotionHome> {
     store.notion_home()
@@ -1139,6 +1162,8 @@ pub fn run() {
             notion_clear_destination,
             notion_preview_row,
             notion_create_row,
+            notion_tasks,
+            notion_task_set_status,
             notion_home,
             notion_set_home,
             notion_clear_home,
