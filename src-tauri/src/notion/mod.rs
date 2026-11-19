@@ -12,6 +12,7 @@ use std::time::Duration;
 pub mod db;
 pub mod dest;
 pub mod edit;
+pub mod askdb;
 pub mod home;
 pub mod tasks;
 pub mod sync;
@@ -210,6 +211,14 @@ impl<'a> Client<'a> {
         let next = if v.get("has_more").and_then(Value::as_bool) == Some(true) { v.get("next_cursor").and_then(Value::as_str).map(str::to_string) } else { None };
         let incomplete = v.pointer("/request_status/type").and_then(Value::as_str) == Some("incomplete");
         Ok((rows, next, incomplete))
+    }
+
+    /// Up to 100 rows, most recently edited first.
+    pub fn query_recent(&self, ds: &str) -> Result<Vec<Value>, String> {
+        let id = parse_page_id(ds).ok_or("That is not a Notion database link or id.")?;
+        let v = self.call("POST", &format!("/v1/data_sources/{id}/query"), Some(json!({
+            "page_size": 100, "sorts": [{ "timestamp": "last_edited_time", "direction": "descending" }] })))?;
+        Ok(v.get("results").and_then(Value::as_array).cloned().unwrap_or_default())
     }
 
     /// The whole page object (properties, parent, trash flag).

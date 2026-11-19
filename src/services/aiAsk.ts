@@ -182,6 +182,45 @@ export function archiveMarkdown(question: string, answer: string, sources: Sourc
   return [`**Question:** ${question.trim()}`, `**Source:** ${where}`, "## Answer", answer.trim(), ...(quotes.length ? ["## Verified quotes", ...quotes] : [])].join("\n\n") + "\n";
 }
 
+/**
+ * Passages from a few Notion pages for a question: each page split at headings, the sections sharing the most words with the
+ * question first (at most 3 per page, 1,200 characters each, 10,000 in all). With no shared words, each page's opening is used.
+ */
+export function passagesFromPages(pages: { title: string; url: string; markdown: string }[], question: string): Passage[] {
+  const words = [...new Set((question.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []))];
+  const cands: { p: Passage; score: number; order: number }[] = [];
+  pages.forEach((pg, pi) => {
+    let heading = "";
+    let buf: string[] = [];
+    const push = () => {
+      const text = buf.join("\n").trim().slice(0, 1200);
+      buf = [];
+      if (!text) return;
+      const low = text.toLowerCase();
+      cands.push({ p: { path: pg.url, rel: pg.title, name: pg.title, heading, text }, score: words.filter((w) => low.includes(w)).length, order: pi * 1000 + cands.length });
+    };
+    for (const line of pg.markdown.split("\n")) {
+      const h = /^#{1,6}\s+(.*)$/.exec(line);
+      if (h) { push(); heading = h[1].trim(); }
+      buf.push(line);
+    }
+    push();
+  });
+  const anyHit = cands.some((c) => c.score > 0);
+  const ranked = anyHit ? cands.filter((c) => c.score > 0).sort((a, b) => b.score - a.score || a.order - b.order) : cands.sort((a, b) => a.order - b.order);
+  const out: Passage[] = [];
+  const perPage = new Map<string, number>();
+  let total = 0;
+  for (const c of ranked) {
+    const n = perPage.get(c.p.path + c.p.name) ?? 0;
+    if (n >= (anyHit ? 3 : 1) || total + c.p.text.length > 10_000 || out.length >= 8) continue;
+    perPage.set(c.p.path + c.p.name, n + 1);
+    total += c.p.text.length;
+    out.push(c.p);
+  }
+  return out;
+}
+
 export function isNotFound(answer: string): boolean {
   const a = answer.trim().toLowerCase();
   return a.startsWith("i couldn't find that in this file") || a.startsWith("i couldn't find that in these notes") || a.startsWith("i couldn't find anything about that");

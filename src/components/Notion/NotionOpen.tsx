@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../services/api";
 import { AskPanel } from "../AiAsk/AskPanel";
+import { passagesFromPages } from "../../services/aiAsk";
 import type { NotionHit } from "../../types";
 import "./notion.css";
 
@@ -28,6 +29,20 @@ export function NotionOpen({ onBack, onOpened }: { onBack: () => void; onOpened:
     } catch (e) { setError(String(e)); } finally { setBusy(false); }
   };
 
+  // Asking across a database: choose it, then each question reads only its best-matching rows.
+  const [dbHits, setDbHits] = useState<NotionHit[] | null>(null);
+  const [askDb, setAskDb] = useState<NotionHit | null>(null);
+  const [dbNote, setDbNote] = useState<string | undefined>(undefined);
+  const findDbs = async () => {
+    setBusy(true); setError(null);
+    try { setDbHits(await api.notionSearchDatabases(query.trim())); } catch (e) { setError(String(e)); } finally { setBusy(false); }
+  };
+  const retrieveFrom = (db: NotionHit) => async (question: string) => {
+    const got = await api.notionDbPages(db.id, question);
+    setDbNote(got.pages.length ? `Read ${got.pages.length} of the ${got.rows} most recently edited rows: ${got.pages.map((p) => p.title).join(", ")}.` : `None of the ${got.rows} most recently edited rows had text to use.`);
+    return passagesFromPages(got.pages, question);
+  };
+
   const ask = async (page: string, title: string, url?: string) => {
     setBusy(true); setError(null); setNotice(null);
     try {
@@ -52,7 +67,9 @@ export function NotionOpen({ onBack, onOpened }: { onBack: () => void; onOpened:
   };
 
   return (
-    asking ? (
+    askDb ? (
+      <AskPanel content="" fileName={askDb.title} notice={dbNote} retrieve={retrieveFrom(askDb)} sourceUrl={askDb.url || undefined} onClose={() => { setAskDb(null); setDbNote(undefined); }} />
+    ) : asking ? (
       <AskPanel content={asking.markdown} fileName={asking.title} notionPage notice={asking.notice} sourceUrl={asking.url} onClose={() => setAsking(null)} />
     ) : (
     <div className="notion-open" onKeyDown={(e) => e.key === "Escape" && onBack()}>
@@ -75,6 +92,15 @@ export function NotionOpen({ onBack, onOpened }: { onBack: () => void; onOpened:
                   <button className="btn" disabled={busy} onClick={() => void ask(h.id, h.title, h.url)} title="Ask a question about this page">ASK</button>
                 </li>
               ))}
+            </ul>
+          )}
+          <div className="voice-actions">
+            <button className="btn" disabled={busy} onClick={() => void findDbs()} title="Ask a question across one of your databases">ASK A DATABASE…</button>
+          </div>
+          {dbHits && (
+            <ul className="notion-hits">
+              {dbHits.length === 0 && <li className="note">No databases found. Search uses the box above (empty lists all).</li>}
+              {dbHits.map((d) => <li key={d.id}><button className="btn" onClick={() => setAskDb(d)}>Ask {d.title}</button></li>)}
             </ul>
           )}
           <p className="note">Click a title to save the page as a new local note, or ASK to question it without saving anything. Nothing in Notion is changed.</p>

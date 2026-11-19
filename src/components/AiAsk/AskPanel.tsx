@@ -26,7 +26,9 @@ type Scope = "note" | "folder" | "vault";
 const EXAMPLES = ["What is still left to do?", "Summarise this file in three bullets.", "What is due soonest?"];
 
 /** Ask a question about the open file; the answer comes only from the file, with quotes you can check. */
-export function AskPanel({ noteId, content, fileName, onClose, notionPage = false, notice, sourceUrl }: { noteId?: string; content: string; fileName: string; onClose: () => void; notionPage?: boolean; notice?: string; sourceUrl?: string }) {
+export function AskPanel({ noteId, content, fileName, onClose, notionPage = false, notice, sourceUrl, retrieve }: { noteId?: string; content: string; fileName: string; onClose: () => void; notionPage?: boolean; notice?: string; sourceUrl?: string;
+  /** Asking across a Notion database: finds the passages for a question. Replaces the single-document mode. */
+  retrieve?: (question: string) => Promise<Passage[]> }) {
   const [scopes, setScopes] = useState<AskScopes | null>(null);
   const [scope, setScope] = useState<Scope>("note");
   const [excluded, setExcluded] = useState(0);
@@ -77,13 +79,13 @@ export function AskPanel({ noteId, content, fileName, onClose, notionPage = fals
       return;
     }
     const turns = items.filter((i) => !i.error);
-    const where = scope === "folder" ? `the folder ${scopes?.folder_name}` : `${scopes?.is_vault ? "the vault" : "the folder"} ${scopes?.vault_name}`;
+    const where = retrieve ? `the database ${fileName}` : scope === "folder" ? `the folder ${scopes?.folder_name}` : `${scopes?.is_vault ? "the vault" : "the folder"} ${scopes?.vault_name}`;
     let passages: Passage[] = [];
     let system: string;
     let user: string;
     let reqItems: { label: string; text: string; typed?: boolean; note?: string }[];
     let doc = "";
-    if (scope === "note" || !noteId) {
+    if ((scope === "note" || !noteId) && !retrieve) {
       const ex = excerptForAsk(content, text);
       doc = ex.text;
       const note = ex.partial ? `This file is long, so only the most relevant parts are sent (${ex.sent} of ${ex.total} pieces). Groq's free plan limits how much it takes per minute.` : undefined;
@@ -95,7 +97,9 @@ export function AskPanel({ noteId, content, fileName, onClose, notionPage = fals
       // Retrieval happens on this computer. Nothing is sent until the receipt below is approved.
       let found;
       try {
-        found = await api.askRetrieve(noteId, scope, retrievalQuery(text, turns[turns.length - 1]?.question));
+        found = retrieve
+          ? { passages: await retrieve(retrievalQuery(text, turns[turns.length - 1]?.question)), excluded: 0 }
+          : await api.askRetrieve(noteId!, scope as "folder" | "vault", retrievalQuery(text, turns[turns.length - 1]?.question));
       } catch (e) {
         setError(String(e));
         return;
@@ -177,7 +181,9 @@ export function AskPanel({ noteId, content, fileName, onClose, notionPage = fals
         </div>
       )}
       <p className="note">
-        {scope === "note"
+        {retrieve
+          ? `For each question, the few rows of ${fileName} whose titles best match it are read, and only their best passages are sent, after you review them. Quotes name their page and section.`
+          : scope === "note"
           ? notionPage
             ? "Answers come only from this Notion page. You review exactly what is sent first. Quotes below each answer are checked against the page and name their section."
             : "Answers come only from this file. Quotes below each answer are checked against the file."
@@ -207,6 +213,9 @@ export function AskPanel({ noteId, content, fileName, onClose, notionPage = fals
                     <li key={s.quote}>
                       “{s.quote}”
                       {s.heading && <span className="note"> › {s.heading}</span>}
+                      {s.passage && retrieve && s.passage.path.startsWith("http") && (
+                        <> <button className="ask-note" title="Open in Notion" onClick={() => void api.openExternal(s.passage!.path).catch(() => {})}>{s.passage.name}{s.passage.heading ? ` › ${s.passage.heading}` : ""}</button></>
+                      )}
                       {s.passage && noteId && (
                         <>
                           {" "}

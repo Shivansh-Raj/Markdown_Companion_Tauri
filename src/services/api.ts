@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { SessionMeta, VoiceDevice, VoiceMode, VoiceStatus } from "./voice/types";
-import type { NotionTasksView, NotionTemplate, NotionDestination, NotionField, NotionMapEntry, NotionRowCreated, NotionRowPreview, NotionSchema, NotionHome, NotionPushed, NotionPushPlan, NotionLinkInfo, NotionPulled, NotionRefreshed, NotionSent, NotionHit, NotionMe, NotionPage, AskPassages, AskScopes, DiscoveredFile, FileEntry, FileSnapshot, KeyStorage, LauncherInfo, NoteContext, Settings, TasksView, TrackedFile } from "../types";
+import type { NotionDbPages, NotionTasksView, NotionTemplate, NotionDestination, NotionField, NotionMapEntry, NotionRowCreated, NotionRowPreview, NotionSchema, NotionHome, NotionPushed, NotionPushPlan, NotionLinkInfo, NotionPulled, NotionRefreshed, NotionSent, NotionHit, NotionMe, NotionPage, AskPassages, AskScopes, DiscoveredFile, FileEntry, FileSnapshot, KeyStorage, LauncherInfo, NoteContext, Settings, TasksView, TrackedFile } from "../types";
 
 export const api = {
   listFiles: () => invoke<FileEntry[]>("list_files"),
@@ -35,6 +35,7 @@ export const api = {
     invoke<NotionRowPreview>("notion_preview_row", { key, title, values }),
   notionCreateRow: (key: string, title: string, markdown: string, values: Record<string, unknown>, source?: { file_id: string; content: string }) =>
     invoke<NotionRowCreated>("notion_create_row", { key, title, markdown, values, source: source ?? null }),
+  notionDbPages: (dataSource: string, question: string) => invoke<NotionDbPages>("notion_db_pages", { dataSource, question }),
   notionTasks: () => invoke<NotionTasksView>("notion_tasks"),
   notionTaskSetStatus: (page: string, expect: string | null, to: string) => invoke<"done" | "stale">("notion_task_set_status", { page, expect, to }),
   notionHome: () => invoke<NotionHome | null>("notion_home"),

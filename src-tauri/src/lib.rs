@@ -731,6 +731,16 @@ async fn notion_task_set_status(
     notion_call(state.inner(), move |c| notion::tasks::set_status(c, &st, &page, expect.as_deref(), &to)).await
 }
 
+/// Reads the few rows of a database most likely to answer a question. Nothing is sent to the AI here.
+#[tauri::command]
+async fn notion_db_pages(
+    data_source: String,
+    question: String,
+    state: State<'_, std::sync::Arc<notion::NotionState>>,
+) -> Result<notion::askdb::DbPages, String> {
+    notion_call(state.inner(), move |c| notion::askdb::pages_for(c, &data_source, &question)).await
+}
+
 #[tauri::command]
 fn notion_home(store: State<Store>) -> Option<store::NotionHome> {
     store.notion_home()
@@ -1164,6 +1174,7 @@ pub fn run() {
             notion_create_row,
             notion_tasks,
             notion_task_set_status,
+            notion_db_pages,
             notion_home,
             notion_set_home,
             notion_clear_home,

@@ -75,3 +75,24 @@ describe("archiving an answer", () => {
     expect(archiveMarkdown("q", "a", [{ quote: "x", verified: false }], { name: "notes.md" })).not.toContain("Verified quotes");
   });
 });
+
+import { passagesFromPages } from "./aiAsk";
+
+describe("passages from Notion pages", () => {
+  const pages = [
+    { title: "Retro", url: "https://notion.so/r", markdown: "# Retro\n\n## Decisions\n\nWe agreed to ship on Friday.\n\n## Other\n\nCake." },
+    { title: "Sprint", url: "https://notion.so/s", markdown: "# Sprint\n\nNothing about it." },
+  ];
+  it("picks the sections that share words with the question and names page and section", () => {
+    const p = passagesFromPages(pages, "When did we agree to ship?");
+    expect(p[0]).toMatchObject({ name: "Retro", heading: "Decisions", path: "https://notion.so/r" });
+    expect(p.some((x) => x.text.includes("Cake"))).toBe(false);
+  });
+  it("falls back to each page's opening when nothing matches, and stays within limits", () => {
+    const p = passagesFromPages(pages, "zzz");
+    expect(p.map((x) => x.name)).toEqual(["Retro", "Sprint"]);
+    const big = passagesFromPages([{ title: "B", url: "u", markdown: Array.from({ length: 30 }, (_, i) => `## S${i}\n\nship ${"x".repeat(1500)}`).join("\n") }], "ship");
+    expect(big.length).toBeLessThanOrEqual(3);
+    expect(big.reduce((n, x) => n + x.text.length, 0)).toBeLessThanOrEqual(10_000);
+  });
+});
