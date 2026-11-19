@@ -8,7 +8,7 @@ import {
   speakingAnalysisMarkdown, STYLE_LABELS, toCoachResult, type CoachResult, type CoachType, type Style,
 } from "../../services/voice/coach";
 import { limitTranscript, timedTranscript } from "../../services/voice/analyses";
-import type { Section } from "../../services/voice/templates";
+import { practiceProperties, type Section } from "../../services/voice/templates";
 import { formatClock } from "../../services/voice/transcript";
 import type { SessionMeta, TranscriptChunk } from "../../services/voice/types";
 import { ExportDialog } from "./ExportDialog";
@@ -210,7 +210,7 @@ export function PracticePanel({ meta, chunks, ready }: { meta: SessionMeta; chun
         );
       })}
 
-      {exporting && <ExportDialog meta={meta} docTitle="presentation feedback" sections={sections} onClose={() => setExporting(false)} />}
+      {exporting && <ExportDialog meta={meta} docTitle="presentation feedback" sections={sections} properties={practiceProperties(analytics)} onClose={() => setExporting(false)} />}
     </div>
   );
 }

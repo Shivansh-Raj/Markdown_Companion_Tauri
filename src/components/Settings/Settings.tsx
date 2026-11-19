@@ -5,6 +5,7 @@ import { acceleratorFromEvent, prettyAccelerator } from "../../services/accelera
 import { THEME_OPTIONS } from "../../services/themeContext";
 import { testKey } from "../../services/ai";
 import { animationsEnabled, setAnimationsEnabled } from "../../services/animations";
+import { DashboardsInstaller } from "./DashboardsInstaller";
 import type { KeyStorage, Settings as SettingsModel, ThemeName } from "../../types";
 
 const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
@@ -198,6 +199,8 @@ export function Settings({ onBack, onChanged }: { onBack: () => void; onChanged:
         <button className="btn" onClick={() => void chooseSaveDir(false)}>CHANGE</button>
         <button className="btn" onClick={() => void chooseSaveDir(true)}>DEFAULT</button>
       </div>
+      <DashboardsInstaller />
+
       <h2>MOTION</h2>
       <label>
         <input

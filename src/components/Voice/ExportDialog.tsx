@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "../../services/api";
-import { appendFromSections, appendToContent, combinedFromSections, standaloneFromSection, type Section } from "../../services/voice/templates";
+import { appendFromSections, appendToContent, combinedFromSections, standaloneFromSection, type ExtraProperties, type Section } from "../../services/voice/templates";
 import { suggestFileName } from "../../services/voice/transcript";
 import type { SessionMeta } from "../../services/voice/types";
 import type { FileEntry } from "../../types";
@@ -15,7 +15,7 @@ type Layout = "combined" | "separate";
 type Dest = "new" | "append" | "daily";
 
 /** Preview and save voice outputs as Markdown: new file(s), or appended to an existing file without touching it. */
-export function ExportDialog({ meta, sections, docTitle, onClose }: { meta: SessionMeta; sections: Section[]; docTitle: string; onClose: () => void }) {
+export function ExportDialog({ meta, sections, docTitle, properties, onClose }: { meta: SessionMeta; sections: Section[]; docTitle: string; properties?: ExtraProperties; onClose: () => void }) {
   const [include, setInclude] = useState<Set<string>>(new Set(sections.map((s) => s.id)));
   const [layout, setLayout] = useState<Layout>("combined");
   const [dest, setDest] = useState<Dest>("new");
@@ -43,9 +43,9 @@ export function ExportDialog({ meta, sections, docTitle, onClose }: { meta: Sess
     if (!chosen.length) return "";
     if (dest === "daily") return appendFromSections(meta, chosen, true);
     if (dest === "append") return appendFromSections(meta, chosen, obsidian);
-    if (layout === "combined") return combinedFromSections(meta, docTitle, chosen, obsidian);
-    return chosen.map((s) => `<!-- ${suggestFileName(meta, s.suffix)}.md -->\n${standaloneFromSection(meta, s, obsidian)}`).join("\n\n");
-  }, [chosen, dest, layout, meta, docTitle, obsidian]);
+    if (layout === "combined") return combinedFromSections(meta, docTitle, chosen, obsidian, properties);
+    return chosen.map((s) => `<!-- ${suggestFileName(meta, s.suffix)}.md -->\n${standaloneFromSection(meta, s, obsidian, properties)}`).join("\n\n");
+  }, [chosen, dest, layout, meta, docTitle, obsidian, properties]);
 
   const chooseFolder = (dir: string | null) => { setFolder(dir); writePref(FOLDER_KEY, dir); };
   const toggleObsidian = (on: boolean) => { setObsidian(on); writePref(OBSIDIAN_KEY, on ? "1" : "0"); };
@@ -80,7 +80,7 @@ export function ExportDialog({ meta, sections, docTitle, onClose }: { meta: Sess
       } else {
         const made: string[] = [];
         for (const s of chosen) {
-          const f = await write(suggestFileName(meta, s.suffix), standaloneFromSection(meta, s, obsidian));
+          const f = await write(suggestFileName(meta, s.suffix), standaloneFromSection(meta, s, obsidian, properties));
           await api.openTracker(f.id);
           made.push(f.display_name);
         }

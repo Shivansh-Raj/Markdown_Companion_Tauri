@@ -10,7 +10,7 @@ mod voice;
 mod windows;
 
 use filesystem::{FileLocks, FileSnapshot, ToggleError};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -215,6 +215,14 @@ struct NoteContext {
     tags: Vec<String>,
     backlinks: Vec<NoteRef>,
     outgoing: Vec<OutLink>,
+    /// Notes about the same things that are not linked yet, each with the words they share.
+    related: Vec<RelatedRef>,
+}
+
+#[derive(Serialize)]
+struct RelatedRef {
+    note: NoteRef,
+    why: Vec<String>,
 }
 
 fn note_ref(n: &vault::Note, count: u32) -> NoteRef {
@@ -256,7 +264,84 @@ fn note_context(id: String, store: State<Store>, vaults: State<vault::VaultState
             .into_iter()
             .map(|(l, r)| OutLink { label: l.label.clone(), target: r.map(|t| note_ref(&index.notes[t], 0)) })
             .collect(),
+        related: index.related(i, 6).into_iter().map(|(j, why)| RelatedRef { note: note_ref(&index.notes[j], 0), why }).collect(),
     }))
+}
+
+#[derive(Serialize)]
+struct AskScopes {
+    vault_name: String,
+    is_vault: bool,
+    folder_name: String,
+    folder_notes: usize,
+    vault_notes: usize,
+}
+
+#[derive(Serialize)]
+struct PassageOut {
+    path: String,
+    rel: String,
+    name: String,
+    heading: String,
+    text: String,
+}
+
+#[derive(Serialize)]
+struct AskPassages {
+    passages: Vec<PassageOut>,
+    notes_in_scope: usize,
+    /// Notes in scope that were left out because their frontmatter says `ai: false`.
+    excluded: usize,
+}
+
+/// What Ask can search from this note: its folder and its vault (or watched folder). None when the note is in neither.
+#[tauri::command(async)]
+fn ask_scopes(id: String, store: State<Store>, vaults: State<vault::VaultState>) -> Result<Option<AskScopes>, String> {
+    let file = store.get(&id).ok_or("Unknown tracker")?;
+    let path = Path::new(&file.canonical_path);
+    let Some((root, is_vault)) = vault::index_root_for(path, &watched_folders(&store)) else { return Ok(None) };
+    let mut all = vaults.0.lock().map_err(|_| "Index is busy".to_string())?;
+    let index = all.entry(root.clone()).or_insert_with(|| vault::VaultIndex::new(root.clone(), is_vault));
+    index.refresh();
+    if index.index_of(path).is_none() {
+        return Ok(None);
+    }
+    let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
+    Ok(Some(AskScopes {
+        vault_name: root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        is_vault,
+        folder_name: dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        folder_notes: index.notes.iter().filter(|n| n.path.starts_with(&dir)).count(),
+        vault_notes: index.notes.len(),
+    }))
+}
+
+/// Finds the passages of the note's folder or vault that best match a question. Read-only and local: nothing is sent
+/// anywhere. The text returned is what the Context Receipt will show before any of it goes to the model.
+#[tauri::command(async)]
+fn ask_retrieve(id: String, scope: String, question: String, store: State<Store>, vaults: State<vault::VaultState>) -> Result<AskPassages, String> {
+    let scope = match scope.as_str() {
+        "folder" => vault::AskScope::Folder,
+        "vault" => vault::AskScope::Vault,
+        _ => return Err("Unknown scope".into()),
+    };
+    let file = store.get(&id).ok_or("Unknown tracker")?;
+    let path = Path::new(&file.canonical_path);
+    let (root, is_vault) = vault::index_root_for(path, &watched_folders(&store)).ok_or("This note is not in a vault or watched folder")?;
+    let mut all = vaults.0.lock().map_err(|_| "Index is busy".to_string())?;
+    let index = all.entry(root.clone()).or_insert_with(|| vault::VaultIndex::new(root.clone(), is_vault));
+    index.refresh();
+    let from = index.index_of(path).ok_or("This note is not indexed")?;
+    let got = index.retrieve(&question, from, scope);
+    Ok(AskPassages {
+        passages: got
+            .passages
+            .into_iter()
+            .map(|p| PassageOut { path: p.path.to_string_lossy().into_owned(), rel: p.rel, name: p.name, heading: p.heading, text: p.text })
+            .collect(),
+        notes_in_scope: got.notes_in_scope,
+        excluded: got.excluded,
+    })
 }
 
 /// Opens a note listed by `note_context`. Only notes the index knows in the same vault can be opened this way.
@@ -423,6 +508,92 @@ fn open_note_by_path(app: AppHandle, path: String, store: State<Store>, vaults: 
 #[tauri::command]
 fn open_tasks_window(app: AppHandle) -> Result<(), String> {
     windows::open_tasks(&app)
+}
+
+// ---- Dashboards (.base files) ----
+
+#[derive(Deserialize)]
+struct NewFile {
+    name: String,
+    content: String,
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+struct InstallResult {
+    name: String,
+    /// False when a file with that name already existed. It is never overwritten.
+    written: bool,
+}
+
+#[derive(Serialize)]
+struct VaultCandidate {
+    path: String,
+    name: String,
+}
+
+fn safe_component(s: &str, ext: Option<&str>) -> bool {
+    let stem = match ext {
+        Some(e) => match s.strip_suffix(e) {
+            Some(st) => st,
+            None => return false,
+        },
+        None => s,
+    };
+    !stem.is_empty()
+        && s.len() <= 80
+        && !stem.starts_with(' ')
+        && stem.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '_' | '-'))
+}
+
+/// Writes new files into `<vault>/<folder>/`. The vault must contain an `.obsidian` folder, names are plain, nothing
+/// is overwritten, and nothing inside `.obsidian` is touched.
+fn install_files(vault: &Path, folder: &str, files: &[NewFile]) -> Result<Vec<InstallResult>, String> {
+    let vault = std::fs::canonicalize(vault).map_err(|_| "That folder does not exist.".to_string())?;
+    if !vault.join(".obsidian").is_dir() {
+        return Err("That folder is not an Obsidian vault (it has no .obsidian folder).".into());
+    }
+    if !safe_component(folder, None) {
+        return Err("The dashboard folder name is not valid.".into());
+    }
+    if files.is_empty() || files.len() > 20 {
+        return Err("Nothing to install.".into());
+    }
+    for f in files {
+        if !safe_component(&f.name, Some(".base")) || f.content.len() > 20_000 {
+            return Err(format!("\"{}\" is not a valid dashboard file.", f.name));
+        }
+    }
+    let dir = vault.join(folder);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("Could not create the folder: {e}"))?;
+    let mut out = Vec::new();
+    for f in files {
+        use std::io::Write;
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(dir.join(&f.name)) {
+            Ok(mut file) => {
+                file.write_all(f.content.as_bytes()).map_err(|e| format!("Could not write {}: {e}", f.name))?;
+                out.push(InstallResult { name: f.name.clone(), written: true });
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => out.push(InstallResult { name: f.name.clone(), written: false }),
+            Err(e) => return Err(format!("Could not write {}: {e}", f.name)),
+        }
+    }
+    Ok(out)
+}
+
+/// Obsidian vaults the app already knows: watched folders and the vaults of tracked notes.
+#[tauri::command]
+fn vault_candidates(store: State<Store>) -> Vec<VaultCandidate> {
+    let (roots, _) = task_sources(&store);
+    roots
+        .into_iter()
+        .filter(|(_, is_vault)| *is_vault)
+        .map(|(p, _)| VaultCandidate { name: p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), path: p.to_string_lossy().into_owned() })
+        .collect()
+}
+
+#[tauri::command]
+fn install_base_files(vault: String, folder: String, files: Vec<NewFile>) -> Result<Vec<InstallResult>, String> {
+    install_files(Path::new(&vault), &folder, &files)
 }
 
 // ---- Optional Obsidian layer ----
@@ -789,6 +960,10 @@ pub fn run() {
             open_external,
             open_wikilink,
             note_context,
+            ask_scopes,
+            vault_candidates,
+            install_base_files,
+            ask_retrieve,
             open_vault_note,
             obsidian_status,
             open_in_obsidian,
@@ -892,3 +1067,53 @@ mod task_tests {
         assert_eq!(again.rows.iter().map(|r| r.title.as_str()).collect::<Vec<_>>(), vec!["first"]);
     }
 }
+
+#[cfg(test)]
+mod install_tests {
+    use super::*;
+    use std::fs;
+
+    fn vault(name: &str, with_obsidian: bool) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("mdc-install-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        if with_obsidian {
+            fs::create_dir_all(d.join(".obsidian")).unwrap();
+        }
+        d
+    }
+
+    fn file(name: &str, content: &str) -> NewFile {
+        NewFile { name: name.into(), content: content.into() }
+    }
+
+    #[test]
+    fn installs_new_files_and_never_overwrites() {
+        let v = vault("ok", true);
+        let first = install_files(&v, "MC Dashboards", &[file("Meetings.base", "a: 1\n"), file("Speaking practice.base", "b: 2\n")]).unwrap();
+        assert_eq!(first.iter().map(|r| r.written).collect::<Vec<_>>(), vec![true, true]);
+        fs::write(v.join("MC Dashboards/Meetings.base"), "my edits\n").unwrap();
+        let second = install_files(&v, "MC Dashboards", &[file("Meetings.base", "a: 1\n"), file("New.base", "c: 3\n")]).unwrap();
+        assert_eq!(second, vec![InstallResult { name: "Meetings.base".into(), written: false }, InstallResult { name: "New.base".into(), written: true }]);
+        assert_eq!(fs::read_to_string(v.join("MC Dashboards/Meetings.base")).unwrap(), "my edits\n");
+        assert!(!v.join(".obsidian").read_dir().unwrap().any(|_| true), ".obsidian must stay untouched");
+    }
+
+    #[test]
+    fn refuses_folders_that_are_not_vaults_and_unsafe_names() {
+        let plain = vault("plain", false);
+        assert!(install_files(&plain, "MC Dashboards", &[file("A.base", "x")]).unwrap_err().contains("not an Obsidian vault"));
+        assert!(!plain.join("MC Dashboards").exists());
+        let v = vault("names", true);
+        for bad in ["../evil.base", "a/b.base", "x.md", ".hidden.base", " lead.base", "", ".base", "a\\b.base"] {
+            assert!(install_files(&v, "MC Dashboards", &[file(bad, "x")]).is_err(), "{bad}");
+        }
+        for bad in ["..", ".obsidian", "a/b", "", "x\\y"] {
+            assert!(install_files(&v, bad, &[file("A.base", "x")]).is_err(), "{bad}");
+        }
+        assert!(install_files(&v, "MC Dashboards", &[file("Big.base", &"x".repeat(20_001))]).is_err());
+        assert!(install_files(&v, "MC Dashboards", &[]).is_err());
+        assert!(!v.join("MC Dashboards").exists(), "validation must happen before anything is created");
+    }
+}
+

@@ -3,9 +3,9 @@ import { api } from "../../services/api";
 import type { NoteContext, NoteRef } from "../../types";
 import "./context.css";
 
-function NoteButton({ n, onOpen, suffix }: { n: NoteRef; onOpen: (n: NoteRef) => void; suffix?: string }) {
+function NoteButton({ n, onOpen, suffix, title }: { n: NoteRef; onOpen: (n: NoteRef) => void; suffix?: string; title?: string }) {
   return (
-    <button className="ctx-note" onClick={() => onOpen(n)} title={n.rel}>
+    <button className="ctx-note" onClick={() => onOpen(n)} title={title ?? n.rel}>
       {n.name}
       {suffix && <span className="ctx-count">{suffix}</span>}
     </button>
@@ -77,6 +77,16 @@ export function ContextPanel({ id, refreshKey, onClose, onOpenInObsidian }: { id
               </div>
             )}
           </section>
+          {ctx.related.length > 0 && (
+            <section>
+              <h4>RELATED, NOT LINKED ({ctx.related.length})</h4>
+              <div className="ctx-list">
+                {ctx.related.map((r) => (
+                  <NoteButton key={r.note.path} n={r.note} onOpen={open} title={`${r.note.rel}\nShares: ${r.why.join(", ")}`} suffix={r.why.slice(0, 2).join(" · ")} />
+                ))}
+              </div>
+            </section>
+          )}
           {ctx.tags.length > 0 && (
             <section>
               <h4>TAGS</h4>

@@ -1,10 +1,26 @@
 import { actionItemsObsidianMarkdown, ANALYSIS_LABELS, ANALYSIS_TYPES, type AnalysisResult, type AnalysisType } from "./analyses";
 import { dateStamp, formatClock } from "./transcript";
+import type { Analytics } from "./analytics";
 import type { SessionMeta } from "./types";
 
+/** Extra frontmatter properties, e.g. speaking numbers for a practice session. Keys are written as given. */
+export type ExtraProperties = Record<string, string | number>;
+
+/** Numbers from the local speaking analysis, as properties a Bases table can show and sort. Missing values are left out. */
+export function practiceProperties(a: Analytics): ExtraProperties {
+  const out: ExtraProperties = { words: a.wordCount };
+  if (a.wpm != null) out.pace_wpm = a.wpm;
+  if (a.articulationWpm != null) out.speaking_wpm = a.articulationWpm;
+  out.filler_count = a.fillerTotal;
+  out.fillers_per_100_words = Math.round(a.fillersPer100 * 10) / 10;
+  if (a.pauses) out.long_pauses = a.pauses.long;
+  return out;
+}
+
 /** YAML frontmatter for Obsidian: properties a vault can filter and chart (Bases, Dataview, search). */
-export function obsidianFrontmatter(meta: SessionMeta, kind: string): string {
+export function obsidianFrontmatter(meta: SessionMeta, kind: string, extra: ExtraProperties = {}): string {
   const minutes = Math.round((meta.durationMs / 60000) * 10) / 10;
+  const more = Object.entries(extra).map(([k, v]) => `${k}: ${typeof v === "number" ? v : JSON.stringify(v)}`);
   return [
     "---",
     `title: ${JSON.stringify(meta.title.trim() || "Recording")}`,
@@ -12,6 +28,7 @@ export function obsidianFrontmatter(meta: SessionMeta, kind: string): string {
     `kind: ${JSON.stringify(kind)}`,
     `date: ${dateStamp(meta.createdAtMs)}`,
     `duration_min: ${minutes}`,
+    ...more,
     `tags: [voice, ${meta.mode}]`,
     "source: markdown-companion",
     "---",
@@ -20,8 +37,8 @@ export function obsidianFrontmatter(meta: SessionMeta, kind: string): string {
   ].join("\n");
 }
 
-function header(meta: SessionMeta, title: string, obsidian = false): string {
-  if (obsidian) return `${obsidianFrontmatter(meta, title)}# ${meta.title.trim() || "Meeting"} — ${title}\n\n`;
+function header(meta: SessionMeta, title: string, obsidian = false, extra: ExtraProperties = {}): string {
+  if (obsidian) return `${obsidianFrontmatter(meta, title, extra)}# ${meta.title.trim() || "Meeting"} — ${title}\n\n`;
   return [
     `# ${meta.title.trim() || "Meeting"} — ${title}`,
     "",
@@ -50,13 +67,13 @@ function noteOf(s: Section): string {
 }
 
 /** One section as a stand-alone document. */
-export function standaloneFromSection(meta: SessionMeta, s: Section, obsidian = false): string {
-  return `${header(meta, s.label, obsidian)}${bodyOf(s, obsidian)}\n${noteOf(s)}`;
+export function standaloneFromSection(meta: SessionMeta, s: Section, obsidian = false, extra: ExtraProperties = {}): string {
+  return `${header(meta, s.label, obsidian, extra)}${bodyOf(s, obsidian)}\n${noteOf(s)}`;
 }
 
 /** Several sections as one document, in the order given. */
-export function combinedFromSections(meta: SessionMeta, docTitle: string, sections: Section[], obsidian = false): string {
-  return `${header(meta, docTitle, obsidian)}${sections.map((s) => `## ${s.label}\n\n${bodyOf(s, obsidian)}\n${noteOf(s)}`).join("\n")}`;
+export function combinedFromSections(meta: SessionMeta, docTitle: string, sections: Section[], obsidian = false, extra: ExtraProperties = {}): string {
+  return `${header(meta, docTitle, obsidian, extra)}${sections.map((s) => `## ${s.label}\n\n${bodyOf(s, obsidian)}\n${noteOf(s)}`).join("\n")}`;
 }
 
 /**

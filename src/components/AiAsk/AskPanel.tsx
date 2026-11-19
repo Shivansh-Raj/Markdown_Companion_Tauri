@@ -4,8 +4,11 @@ import { MarkdownRenderer } from "../MarkdownRenderer/MarkdownRenderer";
 import { streamChat } from "../../services/ai";
 import { useReceipt } from "../Receipt/ReceiptProvider";
 import {
-  askHistoryText, buildAskSystemPrompt, buildAskUserPrompt, isNotFound, limitDoc, parseAskAnswer, type ParsedAnswer, type Turn,
+  askHistoryText, buildAskSystemPrompt, buildAskUserPrompt, buildScopedSystemPrompt, buildScopedUserPrompt, isNotFound, limitDoc,
+  parseAskAnswer, parseScopedAnswer, retrievalQuery, type ParsedAnswer, type Turn,
 } from "../../services/aiAsk";
+import type { AskScopes } from "../../types";
+import type { Passage } from "../../services/aiAsk";
 
 /** Answers are Markdown (lists, bold, code): render them instead of showing raw characters. */
 function Answer({ text }: { text: string }) {
@@ -16,12 +19,17 @@ function Answer({ text }: { text: string }) {
   );
 }
 
-interface Item extends Turn { sources: ParsedAnswer["sources"]; error?: boolean }
+interface Item extends Turn { sources: ParsedAnswer["sources"]; error?: boolean; scoped?: boolean }
+
+type Scope = "note" | "folder" | "vault";
 
 const EXAMPLES = ["What is still left to do?", "Summarise this file in three bullets.", "What is due soonest?"];
 
 /** Ask a question about the open file; the answer comes only from the file, with quotes you can check. */
-export function AskPanel({ content, fileName, onClose }: { content: string; fileName: string; onClose: () => void }) {
+export function AskPanel({ noteId, content, fileName, onClose }: { noteId?: string; content: string; fileName: string; onClose: () => void }) {
+  const [scopes, setScopes] = useState<AskScopes | null>(null);
+  const [scope, setScope] = useState<Scope>("note");
+  const [excluded, setExcluded] = useState(0);
   const [items, setItems] = useState<Item[]>([]);
   const [question, setQuestion] = useState("");
   const [live, setLive] = useState<string | null>(null); // answer being streamed
@@ -34,6 +42,9 @@ export function AskPanel({ content, fileName, onClose }: { content: string; file
   const approve = useReceipt();
 
   useEffect(() => () => abort.current?.abort(), []);
+  useEffect(() => {
+    if (noteId) api.askScopes(noteId).then(setScopes).catch(() => setScopes(null));
+  }, [noteId]);
   useEffect(() => {
     const el = scroller.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -49,12 +60,39 @@ export function AskPanel({ content, fileName, onClose }: { content: string; file
       return;
     }
     const turns = items.filter((i) => !i.error);
-    const system = buildAskSystemPrompt();
-    const user = buildAskUserPrompt(text, turns, doc);
+    const where = scope === "folder" ? `the folder ${scopes?.folder_name}` : `${scopes?.is_vault ? "the vault" : "the folder"} ${scopes?.vault_name}`;
+    let passages: Passage[] = [];
+    let system: string;
+    let user: string;
+    let reqItems: { label: string; text: string; typed?: boolean; note?: string }[];
+    if (scope === "note" || !noteId) {
+      system = buildAskSystemPrompt();
+      user = buildAskUserPrompt(text, turns, doc);
+      reqItems = [{ label: `${fileName}${truncated ? " (first part of the file)" : " (whole file)"}`, text: doc, note: truncated ? "The file is very long, so only the first part is sent." : undefined }];
+    } else {
+      // Retrieval happens on this computer. Nothing is sent until the receipt below is approved.
+      let found;
+      try {
+        found = await api.askRetrieve(noteId, scope, retrievalQuery(text, turns[turns.length - 1]?.question));
+      } catch (e) {
+        setError(String(e));
+        return;
+      }
+      setExcluded(found.excluded);
+      passages = found.passages;
+      if (!passages.length) {
+        setQuestion("");
+        setItems((cur) => [...cur, { question: text, answer: `I couldn't find anything about that in ${where}. Nothing was sent to the AI.`, sources: [], scoped: true }]);
+        return;
+      }
+      system = buildScopedSystemPrompt();
+      user = buildScopedUserPrompt(text, turns, passages);
+      reqItems = passages.map((p) => ({ label: `${p.rel}${p.heading ? ` › ${p.heading}` : ""}`, text: p.text }));
+    }
     const approved = await approve([{
-      purpose: `Ask about ${fileName}`, system, user, mode: "review",
+      purpose: scope === "note" || !noteId ? `Ask about ${fileName}` : `Ask ${where}`, system, user, mode: "review",
       items: [
-        { label: `${fileName}${truncated ? " (first part of the file)" : " (whole file)"}`, text: doc, note: truncated ? "The file is very long, so only the first part is sent." : undefined },
+        ...reqItems,
         ...(turns.length ? [{ label: "Earlier answers in this chat", text: askHistoryText(turns) }] : []),
         { label: "Your question", text, typed: true },
       ],
@@ -70,9 +108,10 @@ export function AskPanel({ content, fileName, onClose }: { content: string; file
         apiKey, approval: approved[0],
         signal: ctl.signal, onText: (t) => setLive(t.replace(/\n?\s*SOURCES:[\s\S]*$/i, "")),
       });
-      const parsed = parseAskAnswer(raw, doc);
+      const scoped = passages.length > 0;
+      const parsed = scoped ? parseScopedAnswer(raw, passages) : parseAskAnswer(raw, doc);
       if (!parsed.answer) throw new Error("The AI returned nothing. Try rephrasing the question.");
-      setItems((cur) => [...cur, { question: text, answer: parsed.answer, sources: parsed.sources }]);
+      setItems((cur) => [...cur, { question: text, answer: parsed.answer, sources: parsed.sources, scoped }]);
     } catch (e) {
       if (ctl.signal.aborted) {
         setQuestion(text); // stopped: put the question back so it can be edited
@@ -103,8 +142,23 @@ export function AskPanel({ content, fileName, onClose }: { content: string; file
         {items.length > 0 && live === null && <button className="btn" onClick={() => setItems([])}>CLEAR</button>}
         <button className="btn" onClick={onClose}>CLOSE</button>
       </div>
-      <p className="note">Answers come only from this file. Quotes below each answer are checked against the file.</p>
-      {truncated && <div className="error" role="status">This file is very long, so only the first part was searched.</div>}
+      {scopes && (
+        <div className="ask-scope">
+          <label htmlFor="ask-scope">Look in</label>
+          <select id="ask-scope" className="search" style={{ margin: 0 }} value={scope} disabled={live !== null} onChange={(e) => setScope(e.target.value as Scope)}>
+            <option value="note">This note</option>
+            <option value="folder">Folder: {scopes.folder_name} ({scopes.folder_notes} notes)</option>
+            <option value="vault">{scopes.is_vault ? "Vault" : "Watched folder"}: {scopes.vault_name} ({scopes.vault_notes} notes)</option>
+          </select>
+        </div>
+      )}
+      <p className="note">
+        {scope === "note"
+          ? "Answers come only from this file. Quotes below each answer are checked against the file."
+          : "Only the passages that best match your question are sent, and you review them first. Quotes are checked against those passages and name their note."}
+        {scope !== "note" && excluded > 0 && ` ${excluded} note${excluded === 1 ? " is" : "s are"} never sent (marked ai: false).`}
+      </p>
+      {scope === "note" && truncated && <div className="error" role="status">This file is very long, so only the first part was searched.</div>}
 
       <div className="ask-log" ref={scroller} aria-live="polite">
         {items.length === 0 && live === null && (
@@ -116,13 +170,25 @@ export function AskPanel({ content, fileName, onClose }: { content: string; file
           <div key={i} className="ask-turn">
             <p className="ask-q"><span className="voice-tag">YOU</span> {it.question}</p>
             <div className={it.error ? "ask-a error" : "ask-a"}>
-              <span className="voice-tag">FILE SAYS</span>
+              <span className="voice-tag">{it.scoped ? "NOTES SAY" : "FILE SAYS"}</span>
               {it.error ? <p>{it.answer}</p> : <Answer text={it.answer} />}
             </div>
             {!it.error && !isNotFound(it.answer) && (
               it.sources.some((s) => s.verified) ? (
                 <ul className="ask-src" aria-label="Quotes from the file">
-                  {it.sources.filter((s) => s.verified).map((s) => <li key={s.quote}>“{s.quote}”</li>)}
+                  {it.sources.filter((s) => s.verified).map((s) => (
+                    <li key={s.quote}>
+                      “{s.quote}”
+                      {s.passage && noteId && (
+                        <>
+                          {" "}
+                          <button className="ask-note" title={s.passage.rel} onClick={() => void api.openVaultNote(noteId, s.passage!.path).catch((e) => setError(String(e)))}>
+                            {s.passage.name}
+                          </button>
+                        </>
+                      )}
+                    </li>
+                  ))}
                 </ul>
               ) : <p className="note">No exact quote could be matched in the file, so double-check this answer.</p>
             )}
@@ -132,8 +198,8 @@ export function AskPanel({ content, fileName, onClose }: { content: string; file
           <div className="ask-turn">
             <p className="ask-q"><span className="voice-tag">YOU</span> {asked}</p>
             <div className="ask-a">
-              <span className="voice-tag">FILE SAYS</span>
-              {live ? <Answer text={live} /> : <p>Reading the file…</p>}
+              <span className="voice-tag">{scope === "note" ? "FILE SAYS" : "NOTES SAY"}</span>
+              {live ? <Answer text={live} /> : <p>Reading {scope === "note" ? "the file" : "the passages"}…</p>}
             </div>
           </div>
         )}

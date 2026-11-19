@@ -45,6 +45,10 @@ pub struct Parsed {
     pub tags: Vec<String>,
     pub links: Vec<Link>,
     pub tasks: Vec<TaskItem>,
+    /// Weighted word counts for lexical search: headings and tags count more than body text.
+    pub terms: HashMap<String, u32>,
+    /// `ai: false` in the frontmatter: this note is never offered to a cloud model.
+    pub ai_excluded: bool,
 }
 
 // ---- Parsing ----
@@ -217,6 +221,38 @@ fn scan_line(line: &str, links: &mut Vec<Link>, tags: &mut Vec<String>) {
     }
 }
 
+const STOPWORDS: &[&str] = &[
+    "the", "and", "for", "with", "that", "this", "are", "was", "were", "you", "your", "from", "have", "has", "had", "not",
+    "but", "can", "will", "all", "any", "one", "into", "out", "our", "their", "they", "them", "then", "than", "what",
+    "when", "where", "who", "how", "why", "which", "would", "should", "could", "about", "also", "just", "more", "most",
+    "some", "such", "there", "these", "those", "been", "being", "its", "his", "her", "she", "him", "off", "per", "via",
+    "yet", "too", "may", "might", "must", "shall", "does", "did", "done", "use", "using", "used", "get", "got", "new",
+];
+
+/// Lower-cased words of two or more letters or digits, without stop words and pure numbers.
+pub fn tokenize(text: &str) -> Vec<String> {
+    text.split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.chars().count() >= 2 && !w.chars().all(|c| c.is_ascii_digit()))
+        .map(str::to_lowercase)
+        .filter(|w| !STOPWORDS.contains(&w.as_str()))
+        .collect()
+}
+
+/// `ai: false` (also `no`, `off`, `0`) in the frontmatter keeps a note away from cloud models.
+fn frontmatter_ai_excluded(lines: &[&str]) -> bool {
+    lines.iter().any(|l| {
+        l.split_once(':').is_some_and(|(k, v)| {
+            k.trim().eq_ignore_ascii_case("ai") && matches!(unquote(v).to_lowercase().as_str(), "false" | "no" | "off" | "0")
+        })
+    })
+}
+
+fn add_terms(terms: &mut HashMap<String, u32>, text: &str, weight: u32) {
+    for t in tokenize(text) {
+        *terms.entry(t).or_default() += weight;
+    }
+}
+
 const TASK_MARKERS: [&str; 11] = ["📅", "⏳", "🛫", "➕", "✅", "❌", "🔁", "🔺", "⏫", "🔼", "🔽"];
 
 fn date_after(text: &str, marker: &str) -> Option<String> {
@@ -290,6 +326,8 @@ pub fn parse_note(content: &str) -> Parsed {
     let (mut tags, aliases) = frontmatter_lists(&fm);
     let mut links = Vec::new();
     let mut tasks = Vec::new();
+    let mut terms: HashMap<String, u32> = HashMap::new();
+    let ai_excluded = frontmatter_ai_excluded(&fm);
     let mut fence: Option<(u8, usize)> = None;
     let body_start = body.as_ptr() as usize - content.as_ptr() as usize;
     let first_line = content[..body_start].bytes().filter(|b| *b == b'\n').count() + 1;
@@ -306,6 +344,8 @@ pub fn parse_note(content: &str) -> Parsed {
             continue;
         }
         if fence.is_none() {
+            let heading = t.starts_with('#') && t.trim_start_matches('#').starts_with(' ');
+            add_terms(&mut terms, line, if heading { 3 } else { 1 });
             scan_line(line, &mut links, &mut tags);
             if let Some((at, done, text)) = parse_task_line(line) {
                 tasks.push(task_from(first_line + n, line_offset + at, done, text));
@@ -314,7 +354,13 @@ pub fn parse_note(content: &str) -> Parsed {
     }
     let mut seen = HashSet::new();
     tags.retain(|t| seen.insert(t.to_lowercase()));
-    Parsed { aliases, tags, links, tasks }
+    for t in &tags {
+        add_terms(&mut terms, &t.replace('/', " "), 3);
+    }
+    for a in &aliases {
+        add_terms(&mut terms, a, 2);
+    }
+    Parsed { aliases, tags, links, tasks, terms, ai_excluded }
 }
 
 // ---- Index ----
@@ -333,6 +379,9 @@ pub struct Note {
     pub name: String,
     pub parsed: Parsed,
     rel_lower: String,
+    /// `parsed.terms` plus the file name (weighted highest), used by search and related notes.
+    terms: HashMap<String, u32>,
+    len: u32,
 }
 
 pub struct VaultIndex {
@@ -348,6 +397,8 @@ pub struct VaultIndex {
     by_alias: HashMap<String, Vec<usize>>,
     resolved: Vec<Vec<Option<usize>>>,
     backlinks: Vec<Vec<(usize, u32)>>,
+    postings: HashMap<String, Vec<(u32, u32)>>,
+    avg_len: f32,
 }
 
 fn mtime_ns(meta: &std::fs::Metadata) -> u128 {
@@ -363,6 +414,7 @@ impl VaultIndex {
         VaultIndex {
             root, is_vault, indexed_at_ms: 0, skipped: Vec::new(), truncated: false, entries: HashMap::new(), notes: Vec::new(),
             by_tail: HashMap::new(), by_alias: HashMap::new(), resolved: Vec::new(), backlinks: Vec::new(),
+            postings: HashMap::new(), avg_len: 1.0,
         }
     }
 
@@ -410,7 +462,10 @@ impl VaultIndex {
                 Ok(parsed) => {
                     let name = p.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
                     let rel_lower = rel.rsplit_once('.').map_or(rel.clone(), |(a, _)| a.to_string()).to_lowercase();
-                    self.notes.push(Note { path: p.clone(), rel, name, parsed: parsed.clone(), rel_lower });
+                    let mut terms = parsed.terms.clone();
+                    add_terms(&mut terms, &name, 5);
+                    let len = terms.values().sum::<u32>().max(1);
+                    self.notes.push(Note { path: p.clone(), rel, name, parsed: parsed.clone(), rel_lower, terms, len });
                 }
                 Err(why) => self.skipped.push(format!("{rel}: {why}")),
             }
@@ -448,7 +503,72 @@ impl VaultIndex {
                 v
             })
             .collect();
+        self.postings.clear();
+        for (i, n) in self.notes.iter().enumerate() {
+            for (t, tf) in &n.terms {
+                self.postings.entry(t.clone()).or_default().push((i as u32, *tf));
+            }
+        }
+        self.avg_len = (self.notes.iter().map(|n| n.len as f32).sum::<f32>() / self.notes.len().max(1) as f32).max(1.0);
         self.indexed_at_ms = now_ms();
+    }
+
+    fn idf(&self, term: &str) -> f32 {
+        let df = self.postings.get(term).map_or(0, Vec::len) as f32;
+        let n = self.notes.len() as f32;
+        (1.0 + (n - df + 0.5) / (df + 0.5)).ln()
+    }
+
+    /// BM25 over weighted term counts. `query` maps a term to its weight in the query. Only notes for which
+    /// `allow` returns true are scored. Returns (note, score), best first.
+    pub fn score(&self, query: &HashMap<String, f32>, allow: &dyn Fn(usize) -> bool, limit: usize) -> Vec<(usize, f32)> {
+        const K1: f32 = 1.4;
+        const B: f32 = 0.75;
+        let mut scores: HashMap<usize, f32> = HashMap::new();
+        for (term, qw) in query {
+            let Some(posts) = self.postings.get(term) else { continue };
+            let idf = self.idf(term);
+            for (i, tf) in posts {
+                let i = *i as usize;
+                if !allow(i) {
+                    continue;
+                }
+                let tf = *tf as f32;
+                let norm = tf * (K1 + 1.0) / (tf + K1 * (1.0 - B + B * self.notes[i].len as f32 / self.avg_len));
+                *scores.entry(i).or_default() += qw * idf * norm;
+            }
+        }
+        let mut out: Vec<(usize, f32)> = scores.into_iter().collect();
+        out.sort_by(|a, b| b.1.total_cmp(&a.1).then(self.notes[a.0].rel.cmp(&self.notes[b.0].rel)));
+        out.truncate(limit);
+        out
+    }
+
+    /// Notes that talk about the same things as note `i` but are not linked to or from it. Each comes with the
+    /// shared words that explain why. Needs at least two shared words, so one common term never links notes.
+    pub fn related(&self, i: usize, limit: usize) -> Vec<(usize, Vec<String>)> {
+        let mut weighted: Vec<(&String, f32)> =
+            self.notes[i].terms.iter().map(|(t, tf)| (t, *tf as f32 * self.idf(t))).collect();
+        weighted.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(b.0)));
+        weighted.truncate(14);
+        let query: HashMap<String, f32> = weighted.iter().map(|(t, w)| ((*t).clone(), *w)).collect();
+        let mut linked: HashSet<usize> = HashSet::from([i]);
+        linked.extend(self.resolved[i].iter().flatten().copied());
+        linked.extend(self.backlinks[i].iter().map(|(b, _)| *b));
+        let top: Vec<(usize, f32)> = self.score(&query, &|j| !linked.contains(&j), limit * 3);
+        let mut out = Vec::new();
+        for (j, _) in top {
+            let mut shared: Vec<&(&String, f32)> = weighted.iter().filter(|(t, _)| self.notes[j].terms.contains_key(*t)).collect();
+            if shared.len() < 2 {
+                continue;
+            }
+            shared.sort_by(|a, b| b.1.total_cmp(&a.1));
+            out.push((j, shared.iter().take(3).map(|(t, _)| (*t).clone()).collect()));
+            if out.len() == limit {
+                break;
+            }
+        }
+        out
     }
 
     fn resolve(&self, from: usize, key: &str) -> Option<usize> {
@@ -482,6 +602,172 @@ impl VaultIndex {
             .filter(|(l, _)| seen.insert(l.key.clone()))
             .map(|(l, r)| (l, *r))
             .collect()
+    }
+}
+
+// ---- Retrieval for Ask ----
+
+/// How far Ask looks: the folder holding the note (and its sub-folders), or the whole vault / watched folder.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AskScope {
+    Folder,
+    Vault,
+}
+
+pub const MAX_PASSAGES: usize = 8;
+pub const MAX_PASSAGE_CHARS: usize = 1200;
+pub const MAX_TOTAL_CHARS: usize = 10_000;
+const MAX_PER_NOTE: usize = 3;
+const MAX_CANDIDATE_NOTES: usize = 12;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Passage {
+    pub path: PathBuf,
+    pub rel: String,
+    pub name: String,
+    pub heading: String,
+    pub text: String,
+}
+
+#[derive(Debug, Default)]
+pub struct Retrieval {
+    pub passages: Vec<Passage>,
+    /// Notes inside the scope, including those left out by `ai: false`.
+    pub notes_in_scope: usize,
+    /// Notes in scope that are never offered to a cloud model.
+    pub excluded: usize,
+}
+
+fn split_long(line: &str, max: usize, out: &mut Vec<String>) {
+    let mut cur = String::new();
+    for ch in line.chars() {
+        if cur.len() + ch.len_utf8() > max {
+            out.push(std::mem::take(&mut cur));
+        }
+        cur.push(ch);
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+}
+
+/// Splits a note into passages: by heading first, then by paragraph so each stays under `max` characters.
+pub fn chunk_note(content: &str, max: usize) -> Vec<(String, String)> {
+    let (_, body) = split_frontmatter(content);
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut heading = String::new();
+    let mut cur = String::new();
+    let mut fence = false;
+    let flush = |out: &mut Vec<(String, String)>, cur: &mut String, heading: &str| {
+        let t = cur.trim();
+        if t.chars().count() >= 12 {
+            out.push((heading.to_string(), t.to_string()));
+        }
+        cur.clear();
+    };
+    for raw in body.lines() {
+        let line = raw.trim_end();
+        let t = line.trim_start();
+        if fence_marker(t).is_some() {
+            fence = !fence;
+        }
+        let is_heading = !fence && t.starts_with('#') && t.trim_start_matches('#').starts_with(' ');
+        if is_heading {
+            flush(&mut out, &mut cur, &heading);
+            heading = t.trim_start_matches('#').trim().to_string();
+            continue;
+        }
+        if line.len() > max {
+            flush(&mut out, &mut cur, &heading);
+            let mut pieces = Vec::new();
+            split_long(line, max, &mut pieces);
+            for piece in pieces {
+                cur = piece;
+                flush(&mut out, &mut cur, &heading);
+            }
+            continue;
+        }
+        if cur.len() + line.len() + 1 > max {
+            flush(&mut out, &mut cur, &heading);
+        }
+        cur.push_str(line);
+        cur.push('\n');
+        if line.trim().is_empty() && cur.len() >= max / 2 {
+            flush(&mut out, &mut cur, &heading);
+        }
+    }
+    flush(&mut out, &mut cur, &heading);
+    out
+}
+
+impl VaultIndex {
+    /// Finds the passages most relevant to `query` within the scope. Candidate notes are ranked from the index;
+    /// only those files are then read from disk and split, so what is returned is the current text. Notes with
+    /// `ai: false` are never returned.
+    pub fn retrieve(&self, query: &str, from: usize, scope: AskScope) -> Retrieval {
+        let from_dir = self.notes[from].path.parent().map(Path::to_path_buf);
+        let in_scope = |i: usize| match scope {
+            AskScope::Vault => true,
+            AskScope::Folder => from_dir.as_ref().is_some_and(|d| self.notes[i].path.starts_with(d)),
+        };
+        let scoped: Vec<usize> = (0..self.notes.len()).filter(|i| in_scope(*i)).collect();
+        let excluded = scoped.iter().filter(|i| self.notes[**i].parsed.ai_excluded).count();
+        let mut result = Retrieval { passages: Vec::new(), notes_in_scope: scoped.len(), excluded };
+
+        let qterms: HashSet<String> = tokenize(query).into_iter().collect();
+        if qterms.is_empty() {
+            return result;
+        }
+        let qmap: HashMap<String, f32> = qterms.iter().map(|t| (t.clone(), 1.0)).collect();
+        let ranked = self.score(&qmap, &|i| in_scope(i) && !self.notes[i].parsed.ai_excluded, MAX_CANDIDATE_NOTES);
+        let best = ranked.first().map_or(1.0, |r| r.1).max(f32::EPSILON);
+
+        const K1: f32 = 1.4;
+        const B: f32 = 0.75;
+        const AVG: f32 = 150.0;
+        let mut scored: Vec<(f32, Passage)> = Vec::new();
+        for (i, note_score) in ranked {
+            let Ok(content) = std::fs::read_to_string(&self.notes[i].path) else { continue };
+            for (heading, text) in chunk_note(&content, MAX_PASSAGE_CHARS) {
+                let mut tf: HashMap<String, u32> = HashMap::new();
+                for t in tokenize(&text) {
+                    *tf.entry(t).or_default() += 1;
+                }
+                for t in tokenize(&heading) {
+                    *tf.entry(t).or_default() += 2;
+                }
+                let len = tf.values().sum::<u32>().max(1) as f32;
+                let mut score = 0.0;
+                let mut matched = 0;
+                for t in &qterms {
+                    if let Some(f) = tf.get(t) {
+                        let f = *f as f32;
+                        score += self.idf(t) * f * (K1 + 1.0) / (f + K1 * (1.0 - B + B * len / AVG));
+                        matched += 1;
+                    }
+                }
+                if matched == 0 {
+                    continue;
+                }
+                score *= 1.0 + 0.5 * matched as f32 / qterms.len() as f32;
+                score += 0.2 * note_score / best;
+                let n = &self.notes[i];
+                scored.push((score, Passage { path: n.path.clone(), rel: n.rel.clone(), name: n.name.clone(), heading, text }));
+            }
+        }
+        scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.rel.cmp(&b.1.rel)));
+        let mut per_note: HashMap<PathBuf, usize> = HashMap::new();
+        let mut total = 0;
+        for (_, p) in scored {
+            let n = per_note.entry(p.path.clone()).or_default();
+            if *n >= MAX_PER_NOTE || result.passages.len() >= MAX_PASSAGES || total + p.text.len() > MAX_TOTAL_CHARS {
+                continue;
+            }
+            *n += 1;
+            total += p.text.len();
+            result.passages.push(p);
+        }
+        result
     }
 }
 
@@ -674,5 +960,113 @@ mod tests {
     fn invalid_dates_are_ignored() {
         let p = parse_note("- [ ] a 📅 tomorrow\n- [ ] b 📅 2026-1-5\n");
         assert!(p.tasks.iter().all(|t| t.due.is_none()));
+    }
+
+    #[test]
+    fn tokenizer_drops_noise_and_lowercases() {
+        assert_eq!(tokenize("The Q4 roadmap, for 2026: ship v1.0 NOW!"), vec!["q4", "roadmap", "ship", "v1", "now"]);
+        assert!(tokenize("a I 12 99").is_empty());
+        assert_eq!(tokenize("Ünïcode café"), vec!["ünïcode", "café"]);
+    }
+
+    #[test]
+    fn frontmatter_can_exclude_a_note_from_ai() {
+        assert!(parse_note("---\nai: false\n---\ntext").ai_excluded);
+        assert!(parse_note("---\nAI: \"No\"\n---\ntext").ai_excluded);
+        assert!(!parse_note("---\nai: true\n---\ntext").ai_excluded);
+        assert!(!parse_note("text\nai: false").ai_excluded); // only frontmatter counts
+    }
+
+    #[test]
+    fn related_notes_share_topics_but_are_not_already_linked() {
+        let r = tree("related");
+        write(&r, "Deploy plan.md", "# Kubernetes deployment\nWe plan the kubernetes rollout and the canary deployment strategy for the cluster.");
+        write(&r, "Rollout notes.md", "# Rollout\nNotes on the kubernetes cluster rollout, canary release and deployment checks.");
+        write(&r, "Linked.md", "Kubernetes deployment cluster rollout canary. See [[Deploy plan]].");
+        write(&r, "Cooking.md", "# Pasta\nBoil water, add salt, cook the pasta, then make the tomato sauce.");
+        write(&r, "One word.md", "A single mention of kubernetes in an otherwise unrelated note about gardening and tomato plants.");
+        let mut idx = VaultIndex::new(r.clone(), true);
+        idx.refresh();
+        let plan = idx.index_of(&r.join("Deploy plan.md")).unwrap();
+        let related = idx.related(plan, 5);
+        let names: Vec<&str> = related.iter().map(|(j, _)| idx.notes[*j].name.as_str()).collect();
+        assert_eq!(names, vec!["Rollout notes"], "linked, unrelated and single-word matches are left out: {names:?}");
+        assert!(related[0].1.len() >= 2 && related[0].1.len() <= 3, "{:?}", related[0].1);
+        assert!(related[0].1.iter().any(|t| t == "kubernetes" || t == "rollout" || t == "canary" || t == "cluster"));
+    }
+
+    #[test]
+    fn search_ranks_titles_and_rare_words_and_respects_scope() {
+        let r = tree("search");
+        write(&r, "A/Budget review.md", "# Budget\nQuarterly budget numbers and the hiring budget.");
+        write(&r, "B/Other.md", "Budget mentioned once in passing, mostly about lunch plans and parking.");
+        write(&r, "A/Misc.md", "Nothing relevant here at all.");
+        let mut idx = VaultIndex::new(r.clone(), true);
+        idx.refresh();
+        let q: HashMap<String, f32> = tokenize("budget").into_iter().map(|t| (t, 1.0)).collect();
+        let all = idx.score(&q, &|_| true, 10);
+        assert_eq!(idx.notes[all[0].0].name, "Budget review");
+        assert_eq!(all.len(), 2); // Misc has no match
+        let only_b = idx.score(&q, &|i| idx.notes[i].rel.starts_with("B/"), 10);
+        assert_eq!(only_b.len(), 1);
+        assert_eq!(idx.notes[only_b[0].0].name, "Other");
+    }
+
+    #[test]
+    fn chunking_splits_by_heading_and_size_and_skips_code_headings() {
+        let md = "---\ntitle: x\n---\nIntro line that is long enough.\n\n# One\nFirst section text here.\n\n```\n# not a heading\n```\n\n## Two\nSecond section text here.\n";
+        let c = chunk_note(md, 1200);
+        let heads: Vec<&str> = c.iter().map(|(h, _)| h.as_str()).collect();
+        assert_eq!(heads, vec!["", "One", "Two"]);
+        assert!(c[1].1.contains("# not a heading"), "{:?}", c[1]);
+        assert!(!c.iter().any(|(_, t)| t.contains("title: x")), "frontmatter is not a passage");
+        let long = format!("# H\n{}\n", "word ".repeat(1000));
+        let pieces = chunk_note(&long, 300);
+        assert!(pieces.len() > 5 && pieces.iter().all(|(h, t)| h == "H" && t.len() <= 300), "{}", pieces.len());
+    }
+
+    #[test]
+    fn retrieval_returns_relevant_passages_within_scope_and_never_excluded_notes() {
+        let r = tree("retrieve");
+        write(&r, "Atlas/Kickoff.md", "# Kickoff\nWe agreed the launch date is 12 March. Maria owns the launch checklist.\n\n# Budget\nThe budget for Atlas is 40k.");
+        write(&r, "Atlas/Secret.md", "---\nai: false\n---\n# Launch\nThe launch date is secretly 1 April and the budget is huge.");
+        write(&r, "Atlas/Deep/Notes.md", "# Risks\nThe launch could slip if the vendor is late.");
+        write(&r, "Other/Elsewhere.md", "# Lunch\nThe launch of the new cafeteria menu is on Friday.");
+        let mut idx = VaultIndex::new(r.clone(), true);
+        idx.refresh();
+        let from = idx.index_of(&r.join("Atlas/Kickoff.md")).unwrap();
+
+        let folder = idx.retrieve("When is the launch date?", from, AskScope::Folder);
+        let names: Vec<&str> = folder.passages.iter().map(|p| p.rel.as_str()).collect();
+        assert_eq!(names[0], "Atlas/Kickoff.md", "{names:?}");
+        assert!(folder.passages[0].text.contains("12 March"));
+        assert!(!names.iter().any(|n| n.contains("Secret")), "ai: false notes must not be returned");
+        assert!(!names.iter().any(|n| n.starts_with("Other/")), "outside the folder");
+        assert_eq!((folder.notes_in_scope, folder.excluded), (3, 1));
+
+        let vault = idx.retrieve("launch date", from, AskScope::Vault);
+        assert!(vault.passages.iter().any(|p| p.rel.starts_with("Other/")));
+        assert!(!vault.passages.iter().any(|p| p.rel.contains("Secret")));
+        assert_eq!((vault.notes_in_scope, vault.excluded), (4, 1));
+    }
+
+    #[test]
+    fn retrieval_respects_its_limits_and_handles_empty_questions() {
+        let r = tree("limits");
+        for i in 0..20 {
+            write(&r, &format!("n{i}.md"), &format!("# Topic {i}\n{}", "alpha beta gamma delta ".repeat(60)));
+        }
+        let mut idx = VaultIndex::new(r.clone(), true);
+        idx.refresh();
+        let from = idx.index_of(&r.join("n0.md")).unwrap();
+        let got = idx.retrieve("alpha beta gamma", from, AskScope::Vault);
+        assert!(got.passages.len() <= MAX_PASSAGES);
+        assert!(got.passages.iter().map(|p| p.text.len()).sum::<usize>() <= MAX_TOTAL_CHARS);
+        let mut per: HashMap<&Path, usize> = HashMap::new();
+        for p in &got.passages {
+            *per.entry(&p.path).or_default() += 1;
+        }
+        assert!(per.values().all(|n| *n <= 3));
+        assert!(idx.retrieve("the and of", from, AskScope::Vault).passages.is_empty()); // only stop words
     }
 }

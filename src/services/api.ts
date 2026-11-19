@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { SessionMeta, VoiceDevice, VoiceMode, VoiceStatus } from "./voice/types";
-import type { DiscoveredFile, FileEntry, FileSnapshot, KeyStorage, LauncherInfo, NoteContext, Settings, TasksView, TrackedFile } from "../types";
+import type { AskPassages, AskScopes, DiscoveredFile, InstallResult, FileEntry, FileSnapshot, KeyStorage, LauncherInfo, NoteContext, Settings, TasksView, TrackedFile, VaultCandidate } from "../types";
 
 export const api = {
   listFiles: () => invoke<FileEntry[]>("list_files"),
@@ -16,6 +16,11 @@ export const api = {
   obsidianStatus: () => invoke<{ app_installed: boolean; cli_path: string | null }>("obsidian_status"),
   noteContext: (id: string) => invoke<NoteContext | null>("note_context", { id }),
   openVaultNote: (id: string, path: string) => invoke<void>("open_vault_note", { id, path }),
+  vaultCandidates: () => invoke<VaultCandidate[]>("vault_candidates"),
+  installBaseFiles: (vault: string, folder: string, files: { name: string; content: string }[]) =>
+    invoke<InstallResult[]>("install_base_files", { vault, folder, files }),
+  askScopes: (id: string) => invoke<AskScopes | null>("ask_scopes", { id }),
+  askRetrieve: (id: string, scope: "folder" | "vault", question: string) => invoke<AskPassages>("ask_retrieve", { id, scope, question }),
   openTasksWindow: () => invoke<void>("open_tasks_window"),
   openTasks: () => invoke<TasksView>("open_tasks"),
   toggleVaultTask: (path: string, offset: number, expect: string, checked: boolean) =>

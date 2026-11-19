@@ -62,10 +62,38 @@ export interface NoteContext {
   tags: string[];
   backlinks: NoteRef[];
   outgoing: { label: string; target: NoteRef | null }[];
+  /** Notes about the same things that are not linked yet, with the words they share. */
+  related: { note: NoteRef; why: string[] }[];
 }
 
 /** Where the Groq key is stored. `file` means it is unprotected in the app data file; `warning` says why. */
 export type KeyStorage = { kind: "none" } | { kind: "keychain" } | { kind: "file"; warning: string };
+
+export interface VaultCandidate {
+  path: string;
+  name: string;
+}
+
+export interface InstallResult {
+  name: string;
+  /** False when the file already existed; it is never overwritten. */
+  written: boolean;
+}
+
+export interface AskScopes {
+  vault_name: string;
+  is_vault: boolean;
+  folder_name: string;
+  folder_notes: number;
+  vault_notes: number;
+}
+
+export interface AskPassages {
+  passages: { path: string; rel: string; name: string; heading: string; text: string }[];
+  notes_in_scope: number;
+  /** Notes left out because their frontmatter says `ai: false`. */
+  excluded: number;
+}
 
 export interface TaskRow {
   path: string;

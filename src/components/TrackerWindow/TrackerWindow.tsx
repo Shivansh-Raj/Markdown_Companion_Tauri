@@ -290,7 +290,7 @@ export function TrackerWindow({ id }: { id: string }) {
         </div>
       )}
       {askOpen && snap ? (
-        <AskPanel content={draft ?? snap.content} fileName={info?.display_name ?? "this file"} onClose={() => setAskOpen(false)} />
+        <AskPanel noteId={id} content={draft ?? snap.content} fileName={info?.display_name ?? "this file"} onClose={() => setAskOpen(false)} />
       ) : aiOpen && snap ? (
         <AiEditPanel
           content={draft ?? snap.content}
