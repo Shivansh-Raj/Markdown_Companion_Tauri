@@ -1,4 +1,5 @@
 import { dateStamp } from "./transcript";
+import type { ActionItem } from "./analyses";
 import type { ExtraProperties } from "./templates";
 import type { SessionMeta } from "./types";
 
@@ -26,4 +27,42 @@ export function notionValues(meta: SessionMeta, extra: ExtraProperties = {}): Re
     source: "Markdown Companion",
     ...extra,
   };
+}
+
+/** One task row to create from an action item. */
+export interface TaskRow {
+  /** Identifies the item for "already sent" tracking: the same wording in the same recording is the same task. */
+  key: string;
+  title: string;
+  body: string;
+  values: Record<string, unknown>;
+  /** Shown beside the item so the user sees what will be filled in. */
+  summary: string;
+}
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+const normalise = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+
+/**
+ * Task rows for the action items. A due date is filled only when the item's deadline is already a real date; wording such
+ * as "by Friday" is kept as text in the page, never turned into a date we are guessing. The owner is written as text
+ * only if the recording named one. `meetingPageId` links each task to the meeting's row, when it was saved as one.
+ */
+export function taskRowsFor(items: ActionItem[], meetingPageId: string | null): TaskRow[] {
+  return items
+    .filter((i) => i.task.trim())
+    .map((i) => {
+      const title = i.task.replace(/\s*\n\s*/g, " ").trim().slice(0, 2000);
+      const deadline = i.deadline?.trim() ?? "";
+      const values: Record<string, unknown> = { status: "Not started" };
+      if (ISO_DAY.test(deadline)) values.due = deadline;
+      if (i.owner?.trim()) values.owner = i.owner.trim();
+      if (meetingPageId) values.meeting = meetingPageId;
+      const lines: string[] = [];
+      if (deadline && !ISO_DAY.test(deadline)) lines.push(`Due: ${deadline}`);
+      if (i.context?.trim()) lines.push(`Context: ${i.context.trim()}`);
+      const bits = [values.due ? `due ${values.due}` : deadline ? `due “${deadline}” (in the page)` : "", values.owner ? `owner ${values.owner}` : ""].filter(Boolean);
+      return { key: normalise(i.task), title, body: lines.join("\n\n"), values, summary: bits.join(" · ") };
+    });
 }

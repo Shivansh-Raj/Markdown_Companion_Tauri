@@ -111,7 +111,7 @@ export function AnalysisPanel({ meta, chunks, ready }: { meta: SessionMeta; chun
         </div>
       ))}
 
-      {exporting && <ExportDialog meta={meta} docTitle="meeting notes" sections={meetingSections(available.map((t) => results[t]!))} onClose={() => setExporting(false)} />}
+      {exporting && <ExportDialog meta={meta} docTitle="meeting notes" actionItems={results.actions?.items} sections={meetingSections(available.map((t) => results[t]!))} onClose={() => setExporting(false)} />}
     </div>
   );
 }

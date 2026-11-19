@@ -3,7 +3,8 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "../../services/api";
 import "../Notion/notion.css";
 import { appendFromSections, appendToContent, bodyFromSections, combinedFromSections, standaloneFromSection, type ExtraProperties, type Section } from "../../services/voice/templates";
-import { notionTargetFor, notionValues } from "../../services/voice/notionExport";
+import type { ActionItem } from "../../services/voice/analyses";
+import { notionTargetFor, notionValues, taskRowsFor } from "../../services/voice/notionExport";
 import { suggestFileName } from "../../services/voice/transcript";
 import type { SessionMeta } from "../../services/voice/types";
 import type { FileEntry, NotionDestination, NotionHome, NotionRowPreview } from "../../types";
@@ -17,7 +18,7 @@ type Layout = "combined" | "separate";
 type Dest = "new" | "append" | "notion";
 
 /** Preview and save voice outputs as Markdown: new file(s), or appended to an existing file without touching it. */
-export function ExportDialog({ meta, sections, docTitle, properties, onClose }: { meta: SessionMeta; sections: Section[]; docTitle: string; properties?: ExtraProperties; onClose: () => void }) {
+export function ExportDialog({ meta, sections, docTitle, properties, actionItems, onClose }: { meta: SessionMeta; sections: Section[]; docTitle: string; properties?: ExtraProperties; actionItems?: ActionItem[]; onClose: () => void }) {
   const [include, setInclude] = useState<Set<string>>(new Set(sections.map((s) => s.id)));
   const [layout, setLayout] = useState<Layout>("combined");
   const [dest, setDest] = useState<Dest>("new");
@@ -39,11 +40,18 @@ export function ExportDialog({ meta, sections, docTitle, properties, onClose }: 
   const [nTitle, setNTitle] = useState(meta.title.trim() || docTitle);
   const [nPreview, setNPreview] = useState<NotionRowPreview | null>(null);
   const [nUrl, setNUrl] = useState<string | null>(null);
+  // Action items can also become task rows. Which were already sent is remembered per recording, so pressing the button twice
+  // does not create the same tasks twice.
+  const SENT_KEY = `notion-tasks-sent:${meta.id}`;
+  const [tasksDb, setTasksDb] = useState<NotionDestination | null>(null);
+  const [sentKeys, setSentKeys] = useState<Set<string>>(() => { try { return new Set<string>(JSON.parse(localStorage.getItem(SENT_KEY) ?? "[]")); } catch { return new Set<string>(); } });
+  const [picked, setPicked] = useState<Set<string> | null>(null); // null = everything not yet sent
 
   useEffect(() => {
     api.notionConnected().then(setNConnected).catch(() => {});
     api.notionHome().then(setNHome).catch(() => {});
     if (nTarget.key !== "notes") api.notionDestination(nTarget.key).then(setNDb).catch(() => {});
+    api.notionDestination("tasks").then(setTasksDb).catch(() => {});
   }, [nTarget.key]);
 
   useEffect(() => {
@@ -62,6 +70,11 @@ export function ExportDialog({ meta, sections, docTitle, properties, onClose }: 
 
   const nBody = useMemo(() => bodyFromSections(chosen), [chosen]);
   const nValues = useMemo(() => notionValues(meta, properties), [meta, properties]);
+  const meetingIsRow = !!nDb && nTarget.key === "meetings";
+  const showTasks = dest === "notion" && meetingIsRow && !!tasksDb && !!actionItems?.length;
+  const taskRows = useMemo(() => taskRowsFor(actionItems ?? [], meetingIsRow ? "(the meeting)" : null), [actionItems, meetingIsRow]);
+  const isPicked = (key: string) => !sentKeys.has(key) && (picked === null || picked.has(key));
+  const togglePick = (key: string) => setPicked((cur) => { const n = new Set(cur ?? taskRows.filter((r) => !sentKeys.has(r.key)).map((r) => r.key)); if (n.has(key)) n.delete(key); else n.add(key); return n; });
   const nReady = nConnected && (nDb !== null || nHome !== null);
 
   // Shows exactly which columns would be filled; reads the database's properties, creates nothing.
@@ -92,9 +105,29 @@ export function ExportDialog({ meta, sections, docTitle, properties, onClose }: 
           ? await api.notionCreateRow(nTarget.key, nTitle, nBody, nValues)
           : await api.notionCreatePage("", nTitle, nBody, undefined, nTarget.section);
         setNUrl(made.url || null);
+        let taskNote = "";
+        if (showTasks && tasksDb) {
+          // Each task links to the meeting's row. They are created one at a time; a failure on one does not stop the rest.
+          const todo = taskRowsFor(actionItems ?? [], made.id).filter((r) => isPicked(r.key));
+          const sent = new Set(sentKeys);
+          let ok = 0;
+          const failed: string[] = [];
+          for (const r of todo) {
+            try {
+              await api.notionCreateRow("tasks", r.title, r.body, r.values);
+              sent.add(r.key);
+              ok++;
+            } catch (e) {
+              failed.push(`“${r.title}”: ${typeof e === "string" ? e : e instanceof Error ? e.message : "failed"}`);
+            }
+          }
+          setSentKeys(sent);
+          try { localStorage.setItem(SENT_KEY, JSON.stringify([...sent])); } catch { /* optional */ }
+          taskNote = ` ${ok} task${ok === 1 ? "" : "s"} created in ${tasksDb.title}.${failed.length ? ` Not created: ${failed.join(" ")}` : ""}`;
+        }
         const warnings: string[] = "warnings" in made ? (made.warnings as string[]) : [];
         const warn = warnings.length ? ` Left empty: ${warnings.join(" ")}` : "";
-        setDone(`Saved to Notion${nDb && nTarget.key !== "notes" ? ` (${nDb.title})` : ` (${nHome?.title} › ${nTarget.label})`}.${warn}`);
+        setDone(`Saved to Notion${nDb && nTarget.key !== "notes" ? ` (${nDb.title})` : ` (${nHome?.title} › ${nTarget.label})`}.${warn}${taskNote}`);
       } else if (dest === "append") {
         const entry = files.find((f) => f.id === target);
         if (!entry) throw new Error("Choose a file to append to.");
@@ -179,6 +212,20 @@ export function ExportDialog({ meta, sections, docTitle, properties, onClose }: 
           </select>
           <span className="note">Added at the end; nothing already in the file is changed.</span>
         </div>
+      )}
+      {showTasks && (
+        <div className="notion-tasks">
+          <p className="note">Also create these as tasks in “{tasksDb!.title}”. Each links to this meeting. Tick the ones you want.</p>
+          {taskRows.map((r) => (
+            <label key={r.key} className="voice-check">
+              <input type="checkbox" checked={isPicked(r.key)} disabled={sentKeys.has(r.key)} onChange={() => togglePick(r.key)} /> {r.title}
+              <span className="note"> {sentKeys.has(r.key) ? "(already sent)" : r.summary}</span>
+            </label>
+          ))}
+        </div>
+      )}
+      {dest === "notion" && !showTasks && !!actionItems?.length && nTarget.key === "meetings" && (
+        <p className="note">{!meetingIsRow ? "To also create tasks, set up a Meetings database in Settings first, so each task can link to its meeting." : "To also create tasks, set up a Tasks database in Settings first."}</p>
       )}
       <textarea className="voice-preview" readOnly aria-label="Preview" value={dest === "notion" ? nBody : preview} />
       {dest === "notion" && nPreview && (
