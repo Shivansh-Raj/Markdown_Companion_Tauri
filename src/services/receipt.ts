@@ -29,6 +29,11 @@ export interface ReceiptRequest {
   user: string;
   items: ReceiptItem[];
   mode: ReceiptMode;
+  /**
+   * Everything sent is text from the file the user has open (plus text they typed), nothing from other notes.
+   * The user may choose to skip the dialog for these (Settings); the receipt is still built and checked.
+   */
+  openFile?: boolean;
 }
 
 export const DESTINATION = "Groq (api.groq.com)";
@@ -92,9 +97,9 @@ export function approvedPayload(a: Approved): { system: string; user: string } {
   return p;
 }
 
-/** True when no dialog is needed: only typed text, or the user's standing opt-in for a periodic feature. */
-export function skipsDialog(reqs: ReceiptRequest[]): boolean {
-  return reqs.every((r) => r.mode === "typed" || r.mode === "standing");
+/** True when no dialog is needed: only typed text, the user's standing opt-in for a periodic feature, or (if allowed) the open file. */
+export function skipsDialog(reqs: ReceiptRequest[], skipOpenFile = false): boolean {
+  return reqs.every((r) => r.mode === "typed" || r.mode === "standing" || (skipOpenFile && r.openFile === true));
 }
 
 /** Merges the items of several requests for one dialog, dropping exact duplicates (same transcript, three prompts). */

@@ -3,6 +3,7 @@ import {
   approxTokens, DESTINATION, fingerprint, mergedItems, mint, skipsDialog, totalChars,
   type Approved, type ReceiptRequest,
 } from "../../services/receipt";
+import { skipOpenFileReview } from "../../services/aiPrefs";
 import "./receipt.css";
 
 interface Pending {
@@ -32,7 +33,7 @@ export function ReceiptProvider({ children }: { children: ReactNode }) {
   const show = useCallback(() => setPending(queue.current[0] ?? null), []);
 
   const approve = useCallback<ApproveFn>((reqs) => {
-    if (skipsDialog(reqs) || reqs.every((r) => remembered.current.has(fingerprint(r)))) {
+    if (skipsDialog(reqs, skipOpenFileReview()) || reqs.every((r) => remembered.current.has(fingerprint(r)))) {
       return Promise.resolve(reqs.map(mint));
     }
     return new Promise((resolve) => {

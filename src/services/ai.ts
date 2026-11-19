@@ -168,6 +168,11 @@ export async function streamChat(opts: {
     }
     if (res.status === 401) throw new Error("Groq rejected the API key. Check it in Settings.");
     if (res.status === 429) throw new Error("Groq rate limit reached. Try again in a moment.");
+    if (res.status === 413) {
+      const m = /Limit (\d+), Requested (\d+)/.exec(detail);
+      const size = m ? ` Your plan allows ${Number(m[1]).toLocaleString()} tokens a minute and this needed about ${Number(m[2]).toLocaleString()}.` : "";
+      throw new Error(`That is too much text for Groq's limit on your plan.${size} Ask about a smaller part, wait a minute, or upgrade the plan.`);
+    }
     throw new Error(`Groq request failed (${res.status}, model ${model}). ${detail}`.trim());
   }
   const reader = res.body.getReader();

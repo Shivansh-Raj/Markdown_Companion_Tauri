@@ -35,7 +35,7 @@ pub struct TaskItem {
     pub title: String,
     pub due: Option<String>,
     pub scheduled: Option<String>,
-    /// Has a `🔁` rule. Completing it creates the next occurrence in Obsidian, so MC never toggles these.
+    /// Has a `🔁` rule. Completing it creates the next occurrence in task plugins, so MC never toggles these.
     pub recurring: bool,
 }
 

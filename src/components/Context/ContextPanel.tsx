@@ -13,7 +13,7 @@ function NoteButton({ n, onOpen, suffix, title }: { n: NoteRef; onOpen: (n: Note
 }
 
 /** Backlinks, outgoing links and tags for the open note, read from a local index of its vault or watched folder. */
-export function ContextPanel({ id, refreshKey, onClose, onOpenInObsidian }: { id: string; refreshKey: string; onClose: () => void; onOpenInObsidian?: () => void }) {
+export function ContextPanel({ id, refreshKey, onClose }: { id: string; refreshKey: string; onClose: () => void; onOpenInObsidian?: () => void }) {
   const [ctx, setCtx] = useState<NoteContext | null | undefined>(undefined); // undefined = loading, null = not in a vault
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
@@ -36,9 +36,6 @@ export function ContextPanel({ id, refreshKey, onClose, onOpenInObsidian }: { id
     <div className="ctx-panel" role="region" aria-label="Linked notes">
       <div className="ctx-head">
         <strong>{ctx ? `${ctx.is_vault ? "VAULT" : "FOLDER"}: ${ctx.vault_name}` : "LINKED NOTES"}</strong>
-        {onOpenInObsidian && (
-          <button className="btn" onClick={onOpenInObsidian} title="Open this note in Obsidian (it must be inside a vault)">OBSIDIAN</button>
-        )}
         <button className="btn" onClick={() => setTick((t) => t + 1)} aria-label="Refresh links">↻</button>
         <button className="btn" onClick={onClose} aria-label="Close linked notes">✕</button>
       </div>
@@ -46,7 +43,7 @@ export function ContextPanel({ id, refreshKey, onClose, onOpenInObsidian }: { id
       {ctx === undefined && !error && <div className="ctx-empty">Indexing…</div>}
       {ctx === null && (
         <div className="ctx-empty">
-          This note is not in an Obsidian vault or a watched folder. Add its folder in the launcher to see links.
+          This note is not in a watched folder or vault. Add its folder in the launcher to see links.
         </div>
       )}
       {ctx && (

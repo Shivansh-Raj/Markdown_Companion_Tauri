@@ -6,13 +6,13 @@ import { suggestFileName } from "../../services/voice/transcript";
 import type { SessionMeta } from "../../services/voice/types";
 import type { FileEntry } from "../../types";
 
-const OBSIDIAN_KEY = "voice-obsidian-format";
+const FRONTMATTER_KEY = "voice-frontmatter";
 const FOLDER_KEY = "voice-export-folder";
 const readPref = (k: string): string | null => { try { return localStorage.getItem(k); } catch { return null; } };
 const writePref = (k: string, v: string | null) => { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* optional */ } };
 
 type Layout = "combined" | "separate";
-type Dest = "new" | "append" | "daily";
+type Dest = "new" | "append";
 
 /** Preview and save voice outputs as Markdown: new file(s), or appended to an existing file without touching it. */
 export function ExportDialog({ meta, sections, docTitle, properties, onClose }: { meta: SessionMeta; sections: Section[]; docTitle: string; properties?: ExtraProperties; onClose: () => void }) {
@@ -21,9 +21,8 @@ export function ExportDialog({ meta, sections, docTitle, properties, onClose }: 
   const [dest, setDest] = useState<Dest>("new");
   const [name, setName] = useState(suggestFileName(meta, docTitle));
   const [folder, setFolder] = useState<string | null>(() => readPref(FOLDER_KEY)); // null = the default save folder
-  const [obsidian, setObsidian] = useState(() => readPref(OBSIDIAN_KEY) === "1");
+  const [frontmatter, setFrontmatter] = useState(() => readPref(FRONTMATTER_KEY) === "1");
   const [watched, setWatched] = useState<string[]>([]);
-  const [dailyReady, setDailyReady] = useState(false); // Obsidian CLI found on disk
   const [defaultDir, setDefaultDir] = useState("");
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [target, setTarget] = useState("");
@@ -34,21 +33,19 @@ export function ExportDialog({ meta, sections, docTitle, properties, onClose }: 
   useEffect(() => {
     api.getSaveDir().then(setDefaultDir).catch(() => {});
     api.listFolders().then(setWatched).catch(() => {});
-    api.obsidianStatus().then((s) => setDailyReady(!!s.cli_path)).catch(() => {});
     api.listFiles().then((f) => { setFiles(f); setTarget(f[0]?.id ?? ""); }).catch(() => {});
   }, []);
 
   const chosen = useMemo(() => sections.filter((s) => include.has(s.id)), [sections, include]);
   const preview = useMemo(() => {
     if (!chosen.length) return "";
-    if (dest === "daily") return appendFromSections(meta, chosen, true);
-    if (dest === "append") return appendFromSections(meta, chosen, obsidian);
-    if (layout === "combined") return combinedFromSections(meta, docTitle, chosen, obsidian, properties);
-    return chosen.map((s) => `<!-- ${suggestFileName(meta, s.suffix)}.md -->\n${standaloneFromSection(meta, s, obsidian, properties)}`).join("\n\n");
-  }, [chosen, dest, layout, meta, docTitle, obsidian, properties]);
+    if (dest === "append") return appendFromSections(meta, chosen);
+    if (layout === "combined") return combinedFromSections(meta, docTitle, chosen, frontmatter, properties);
+    return chosen.map((s) => `<!-- ${suggestFileName(meta, s.suffix)}.md -->\n${standaloneFromSection(meta, s, frontmatter, properties)}`).join("\n\n");
+  }, [chosen, dest, layout, meta, docTitle, frontmatter, properties]);
 
   const chooseFolder = (dir: string | null) => { setFolder(dir); writePref(FOLDER_KEY, dir); };
-  const toggleObsidian = (on: boolean) => { setObsidian(on); writePref(OBSIDIAN_KEY, on ? "1" : "0"); };
+  const toggleFrontmatter = (on: boolean) => { setFrontmatter(on); writePref(FRONTMATTER_KEY, on ? "1" : "0"); };
 
   const pickFolder = async () => {
     const dir = await open({ directory: true, multiple: false });
@@ -61,11 +58,7 @@ export function ExportDialog({ meta, sections, docTitle, properties, onClose }: 
     setDone(null);
     try {
       const write = (n: string, c: string) => (folder ? api.createMarkdownFileIn(folder, n, c) : api.createMarkdownFile(n, c));
-      if (dest === "daily") {
-        // Obsidian's own daily-note settings decide the file; we only hand it the text.
-        const out = await api.obsidianDailyAppend(preview);
-        setDone(out ? `Added to today's daily note. Obsidian said: ${out}` : "Added to today's daily note.");
-      } else if (dest === "append") {
+      if (dest === "append") {
         const entry = files.find((f) => f.id === target);
         if (!entry) throw new Error("Choose a file to append to.");
         const snap = await api.readTrackerFile(entry.id);
@@ -80,7 +73,7 @@ export function ExportDialog({ meta, sections, docTitle, properties, onClose }: 
       } else {
         const made: string[] = [];
         for (const s of chosen) {
-          const f = await write(suggestFileName(meta, s.suffix), standaloneFromSection(meta, s, obsidian, properties));
+          const f = await write(suggestFileName(meta, s.suffix), standaloneFromSection(meta, s, frontmatter, properties));
           await api.openTracker(f.id);
           made.push(f.display_name);
         }
@@ -104,16 +97,13 @@ export function ExportDialog({ meta, sections, docTitle, properties, onClose }: 
         ))}
       </div>
       <div className="voice-actions">
-        <label className="voice-check" title="Adds frontmatter properties and Obsidian Tasks-style action items. Plain Markdown otherwise.">
-          <input type="checkbox" checked={obsidian} onChange={(e) => toggleObsidian(e.target.checked)} /> Obsidian format
+        <label className="voice-check" title="Adds a YAML properties block (date, type, duration, tags) at the top of new files.">
+          <input type="checkbox" checked={frontmatter} onChange={(e) => toggleFrontmatter(e.target.checked)} /> Frontmatter properties
         </label>
       </div>
       <div className="voice-actions">
         <label className="voice-check"><input type="radio" name="dest" checked={dest === "new"} onChange={() => setDest("new")} /> New file</label>
         <label className="voice-check"><input type="radio" name="dest" checked={dest === "append"} onChange={() => setDest("append")} /> Add to an existing file</label>
-        {dailyReady && (
-          <label className="voice-check" title="Uses the Obsidian command line; Obsidian starts if it is not running"><input type="radio" name="dest" checked={dest === "daily"} onChange={() => setDest("daily")} /> Today's daily note (Obsidian)</label>
-        )}
         {dest === "new" && (
           <>
             <label className="voice-check"><input type="radio" name="layout" checked={layout === "combined"} onChange={() => setLayout("combined")} /> One document</label>
@@ -134,10 +124,6 @@ export function ExportDialog({ meta, sections, docTitle, properties, onClose }: 
           <button className="btn" onClick={() => void pickFolder()}>CHOOSE FOLDER</button>
           {folder && <button className="btn" onClick={() => chooseFolder(null)}>DEFAULT</button>}
         </div>
-      ) : dest === "daily" ? (
-        <div className="voice-actions">
-          <span className="note">Added to the end of today's note, in whatever folder and format your Obsidian daily-note settings use.</span>
-        </div>
       ) : (
         <div className="voice-actions">
           <select className="search" style={{ flex: 1, margin: 0 }} aria-label="File to add to" value={target} onChange={(e) => setTarget(e.target.value)}>
@@ -152,7 +138,7 @@ export function ExportDialog({ meta, sections, docTitle, properties, onClose }: 
       {done && <div className="voice-warn" role="status">{done}</div>}
       <div className="voice-actions">
         <button className="btn primary" disabled={busy || !chosen.length || (dest === "append" && !target)} onClick={() => void save()}>
-          {dest === "new" ? "SAVE & OPEN" : dest === "daily" ? "ADD TO DAILY NOTE" : "ADD TO FILE"}
+          {dest === "new" ? "SAVE & OPEN" : "ADD TO FILE"}
         </button>
         <button className="btn" onClick={onClose}>CLOSE</button>
       </div>

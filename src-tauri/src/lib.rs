@@ -1,7 +1,7 @@
 mod discovery;
 mod external;
 mod filesystem;
-mod obsidian;
+mod notion;
 mod secrets;
 mod store;
 mod vault;
@@ -510,128 +510,272 @@ fn open_tasks_window(app: AppHandle) -> Result<(), String> {
     windows::open_tasks(&app)
 }
 
-// ---- Dashboards (.base files) ----
+// ---- Notion ----
 
+/// Runs a blocking Notion call off the UI thread, with the stored token.
+async fn notion_call<T: Send + 'static>(
+    state: &std::sync::Arc<notion::NotionState>,
+    f: impl FnOnce(&notion::Client) -> Result<T, String> + Send + 'static,
+) -> Result<T, String> {
+    let token = state.require_token()?;
+    tauri::async_runtime::spawn_blocking(move || f(&notion::Client::new(&notion::Network, &token)))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn notion_connected(state: State<std::sync::Arc<notion::NotionState>>) -> Result<bool, String> {
+    Ok(state.token()?.is_some())
+}
+
+/// Checks the token with Notion and stores it in the credential store only if Notion accepts it.
+#[tauri::command]
+async fn notion_connect(token: String, state: State<'_, std::sync::Arc<notion::NotionState>>) -> Result<notion::Me, String> {
+    let state = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || state.connect(&notion::Network, &token))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+fn notion_disconnect(state: State<std::sync::Arc<notion::NotionState>>) -> Result<(), String> {
+    state.disconnect()
+}
+
+#[tauri::command]
+async fn notion_test(state: State<'_, std::sync::Arc<notion::NotionState>>) -> Result<notion::Me, String> {
+    notion_call(state.inner(), |c| c.me()).await
+}
+
+#[tauri::command]
+async fn notion_search(query: String, state: State<'_, std::sync::Arc<notion::NotionState>>) -> Result<Vec<notion::PageHit>, String> {
+    notion_call(state.inner(), move |c| c.search_pages(&query)).await
+}
+
+/// Where the note being sent came from, so the new page can be linked to it.
 #[derive(Deserialize)]
-struct NewFile {
-    name: String,
+struct SendSource {
+    file_id: String,
     content: String,
 }
 
-#[derive(Serialize, Debug, PartialEq)]
-struct InstallResult {
-    name: String,
-    /// False when a file with that name already existed. It is never overwritten.
-    written: bool,
+#[derive(Serialize)]
+struct SentPage {
+    id: String,
+    url: String,
+    /// False if Notion created the page but linking it to the local file failed (nothing is lost; just not tracked).
+    linked: bool,
 }
 
 #[derive(Serialize)]
-struct VaultCandidate {
-    path: String,
-    name: String,
-}
-
-fn safe_component(s: &str, ext: Option<&str>) -> bool {
-    let stem = match ext {
-        Some(e) => match s.strip_suffix(e) {
-            Some(st) => st,
-            None => return false,
-        },
-        None => s,
-    };
-    !stem.is_empty()
-        && s.len() <= 80
-        && !stem.starts_with(' ')
-        && stem.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '_' | '-'))
-}
-
-/// Writes new files into `<vault>/<folder>/`. The vault must contain an `.obsidian` folder, names are plain, nothing
-/// is overwritten, and nothing inside `.obsidian` is touched.
-fn install_files(vault: &Path, folder: &str, files: &[NewFile]) -> Result<Vec<InstallResult>, String> {
-    let vault = std::fs::canonicalize(vault).map_err(|_| "That folder does not exist.".to_string())?;
-    if !vault.join(".obsidian").is_dir() {
-        return Err("That folder is not an Obsidian vault (it has no .obsidian folder).".into());
-    }
-    if !safe_component(folder, None) {
-        return Err("The dashboard folder name is not valid.".into());
-    }
-    if files.is_empty() || files.len() > 20 {
-        return Err("Nothing to install.".into());
-    }
-    for f in files {
-        if !safe_component(&f.name, Some(".base")) || f.content.len() > 20_000 {
-            return Err(format!("\"{}\" is not a valid dashboard file.", f.name));
-        }
-    }
-    let dir = vault.join(folder);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("Could not create the folder: {e}"))?;
-    let mut out = Vec::new();
-    for f in files {
-        use std::io::Write;
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(dir.join(&f.name)) {
-            Ok(mut file) => {
-                file.write_all(f.content.as_bytes()).map_err(|e| format!("Could not write {}: {e}", f.name))?;
-                out.push(InstallResult { name: f.name.clone(), written: true });
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => out.push(InstallResult { name: f.name.clone(), written: false }),
-            Err(e) => return Err(format!("Could not write {}: {e}", f.name)),
-        }
-    }
-    Ok(out)
-}
-
-/// Obsidian vaults the app already knows: watched folders and the vaults of tracked notes.
-#[tauri::command]
-fn vault_candidates(store: State<Store>) -> Vec<VaultCandidate> {
-    let (roots, _) = task_sources(&store);
-    roots
-        .into_iter()
-        .filter(|(_, is_vault)| *is_vault)
-        .map(|(p, _)| VaultCandidate { name: p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), path: p.to_string_lossy().into_owned() })
-        .collect()
+struct SentRow {
+    id: String,
+    url: String,
+    warnings: Vec<String>,
+    linked: bool,
 }
 
 #[tauri::command]
-fn install_base_files(vault: String, folder: String, files: Vec<NewFile>) -> Result<Vec<InstallResult>, String> {
-    install_files(Path::new(&vault), &folder, &files)
+async fn notion_create_page(
+    parent: String,
+    title: String,
+    markdown: String,
+    source: Option<SendSource>,
+    section: Option<String>,
+    state: State<'_, std::sync::Arc<notion::NotionState>>,
+    store: State<'_, Store>,
+) -> Result<SentPage, String> {
+    let store = store.inner().clone();
+    notion_call(state.inner(), move |c| {
+        // A section (notes, meetings, …) is looked up or created under the home page; otherwise the chosen parent is used.
+        let parent = match &section {
+            Some(key) => notion::home::ensure_section(c, &store, key)?,
+            None => parent,
+        };
+        let made = c.create_page(&parent, &title, &markdown)?;
+        let linked = match &source {
+            Some(s) => notion::sync::link_created(c, &store, &s.file_id, &s.content, &made, title.trim()),
+            None => false,
+        };
+        Ok(SentPage { id: made.id, url: made.url, linked })
+    })
+    .await
 }
 
-// ---- Optional Obsidian layer ----
-
-#[derive(Serialize)]
-struct ObsidianStatus {
-    app_installed: bool,
-    cli_path: Option<String>,
-}
-
-/// Looks for the app bundle and the CLI symlink on disk. It never runs the CLI (which would launch Obsidian).
+/// Fetches a Notion page into a new local file (or opens the file already linked to it) and opens it.
 #[tauri::command]
-fn obsidian_status() -> ObsidianStatus {
-    ObsidianStatus {
-        app_installed: obsidian::app_installed(),
-        cli_path: obsidian::find_cli().map(|p| p.to_string_lossy().into_owned()),
-    }
+async fn notion_pull(
+    app: AppHandle,
+    page: String,
+    state: State<'_, std::sync::Arc<notion::NotionState>>,
+    store: State<'_, Store>,
+) -> Result<notion::sync::Pulled, String> {
+    let dir = save_dir(&app, &store)?;
+    let st = store.inner().clone();
+    let pulled = notion_call(state.inner(), move |c| notion::sync::pull(c, &st, &dir, &page)).await?;
+    open_tracker_impl(&app, &pulled.file_id)?;
+    Ok(pulled)
 }
 
-/// Opens a tracked file in Obsidian via `obsidian://open?path=...`. The URI is built here from the stored path.
 #[tauri::command]
-fn open_in_obsidian(app: AppHandle, id: String, store: State<Store>) -> Result<(), String> {
-    if !obsidian::app_installed() {
-        return Err("Obsidian does not appear to be installed.".into());
-    }
-    let file = store.get(&id).ok_or_else(|| "Unknown tracker".to_string())?;
-    let uri = obsidian::open_uri(Path::new(&file.canonical_path));
-    app.opener().open_url(uri, None::<&str>).map_err(|e| e.to_string())
+fn notion_destination_fields(destination: String) -> Result<&'static [notion::db::Field], String> {
+    notion::db::fields_for(&destination).ok_or_else(|| "Unknown destination.".to_string())
 }
 
-/// Appends text to today's daily note through the Obsidian CLI, so Obsidian's own daily-note settings decide where it goes.
 #[tauri::command]
-async fn obsidian_daily_append(content: String, heading: Option<String>) -> Result<String, String> {
-    let bin = obsidian::find_cli().ok_or_else(|| "The Obsidian command line is not set up (Obsidian Settings → General → Command line interface).".to_string())?;
-    let args = obsidian::daily_append_args(&content, heading.as_deref())?;
-    tauri::async_runtime::spawn_blocking(move || obsidian::run_cli(&bin, &args, obsidian::cli_timeout()))
-        .await
-        .map_err(|e| e.to_string())?
+async fn notion_search_databases(query: String, state: State<'_, std::sync::Arc<notion::NotionState>>) -> Result<Vec<notion::PageHit>, String> {
+    notion_call(state.inner(), move |c| c.search_data_sources(&query)).await
+}
+
+#[tauri::command]
+async fn notion_schema(data_source: String, state: State<'_, std::sync::Arc<notion::NotionState>>) -> Result<notion::db::Schema, String> {
+    notion_call(state.inner(), move |c| c.data_source_schema(&data_source)).await
+}
+
+/// What CREATE FOR ME would make: the database title and its columns. Reads nothing from Notion.
+#[tauri::command]
+fn notion_template(key: String, store: State<Store>) -> Result<notion::db::Template, String> {
+    let meetings = store.notion_destination("meetings").map(|d| d.data_source_id);
+    notion::db::template_for(&key, meetings.as_deref()).ok_or_else(|| "Unknown destination.".to_string())
+}
+
+/// Creates the database for a destination inside the home page and maps it. Runs only when the user confirms.
+#[tauri::command]
+async fn notion_create_destination(
+    key: String,
+    state: State<'_, std::sync::Arc<notion::NotionState>>,
+    store: State<'_, Store>,
+) -> Result<store::NotionDestination, String> {
+    let st = store.inner().clone();
+    notion_call(state.inner(), move |c| notion::dest::create_destination(c, &st, &key)).await
+}
+
+#[tauri::command]
+fn notion_destination(key: String, store: State<Store>) -> Option<store::NotionDestination> {
+    store.notion_destination(&key)
+}
+
+#[tauri::command]
+async fn notion_set_destination(
+    key: String,
+    data_source: String,
+    mapping: Vec<notion::db::MapEntry>,
+    state: State<'_, std::sync::Arc<notion::NotionState>>,
+    store: State<'_, Store>,
+) -> Result<store::NotionDestination, String> {
+    let st = store.inner().clone();
+    notion_call(state.inner(), move |c| notion::dest::set_destination(c, &st, &key, &data_source, mapping)).await
+}
+
+#[tauri::command]
+fn notion_clear_destination(key: String, store: State<Store>) -> Result<(), String> {
+    store.set_notion_destination(&key, None)
+}
+
+/// What a new row would contain, without creating it.
+#[tauri::command]
+async fn notion_preview_row(
+    key: String,
+    title: String,
+    values: serde_json::Map<String, serde_json::Value>,
+    state: State<'_, std::sync::Arc<notion::NotionState>>,
+    store: State<'_, Store>,
+) -> Result<notion::dest::RowPreview, String> {
+    let st = store.inner().clone();
+    notion_call(state.inner(), move |c| notion::dest::preview_row(c, &st, &key, &title, &values)).await
+}
+
+#[tauri::command]
+async fn notion_create_row(
+    key: String,
+    title: String,
+    markdown: String,
+    values: serde_json::Map<String, serde_json::Value>,
+    source: Option<SendSource>,
+    state: State<'_, std::sync::Arc<notion::NotionState>>,
+    store: State<'_, Store>,
+) -> Result<SentRow, String> {
+    let st = store.inner().clone();
+    notion_call(state.inner(), move |c| {
+        let made = notion::dest::create_row(c, &st, &key, &title, &markdown, &values)?;
+        // When the row came from a note, link them so the note can be refreshed and pushed later.
+        let linked = match &source {
+            Some(s) => notion::sync::link_created(c, &st, &s.file_id, &s.content, &notion::Created { id: made.id.clone(), url: made.url.clone() }, title.trim()),
+            None => false,
+        };
+        Ok(SentRow { id: made.id, url: made.url, warnings: made.warnings, linked })
+    })
+    .await
+}
+
+#[tauri::command]
+fn notion_home(store: State<Store>) -> Option<store::NotionHome> {
+    store.notion_home()
+}
+
+/// Makes a page (a link or id) the home page for everything MC creates in Notion.
+#[tauri::command]
+async fn notion_set_home(
+    page: String,
+    state: State<'_, std::sync::Arc<notion::NotionState>>,
+    store: State<'_, Store>,
+) -> Result<store::NotionHome, String> {
+    let st = store.inner().clone();
+    notion_call(state.inner(), move |c| notion::home::set_home(c, &st, &page)).await
+}
+
+#[tauri::command]
+fn notion_clear_home(store: State<Store>) -> Result<(), String> {
+    store.set_notion_home(None)
+}
+
+#[tauri::command]
+fn notion_link(file_id: String, store: State<Store>) -> Result<Option<notion::sync::LinkInfo>, String> {
+    notion::sync::link_info(&store, &file_id)
+}
+
+/// What a push would change in Notion. Reads only; nothing is written.
+#[tauri::command]
+async fn notion_push_plan(
+    file_id: String,
+    state: State<'_, std::sync::Arc<notion::NotionState>>,
+    store: State<'_, Store>,
+) -> Result<notion::sync::PushPlan, String> {
+    let st = store.inner().clone();
+    notion_call(state.inner(), move |c| notion::sync::plan_push(c, &st, &file_id)).await
+}
+
+/// Sends the previewed edit to Notion, after re-checking that neither side changed.
+#[tauri::command]
+async fn notion_push(
+    file_id: String,
+    expected_hash: String,
+    state: State<'_, std::sync::Arc<notion::NotionState>>,
+    store: State<'_, Store>,
+) -> Result<notion::sync::Pushed, String> {
+    let st = store.inner().clone();
+    notion_call(state.inner(), move |c| notion::sync::push(c, &st, &file_id, &expected_hash)).await
+}
+
+/// Brings Notion's changes into a linked file when the local file has no unsynced edits.
+#[tauri::command]
+async fn notion_refresh(
+    app: AppHandle,
+    file_id: String,
+    state: State<'_, std::sync::Arc<notion::NotionState>>,
+    store: State<'_, Store>,
+) -> Result<notion::sync::Refreshed, String> {
+    let st = store.inner().clone();
+    notion_call(state.inner(), move |c| {
+        let locks = app.state::<FileLocks>();
+        notion::sync::refresh(c, &st, &locks, &file_id)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn notion_read_page(page: String, state: State<'_, std::sync::Arc<notion::NotionState>>) -> Result<notion::PageMarkdown, String> {
+    notion_call(state.inner(), move |c| c.read_page(&page)).await
 }
 
 // ---- AI file creation ----
@@ -848,6 +992,7 @@ pub fn run() {
             let store = Store::load(data_dir.join("store.json"));
             let shortcut = store.shortcut();
             app.manage(store.clone());
+            app.manage(std::sync::Arc::new(notion::NotionState::new(std::sync::Arc::new(secrets::Keychain::notion()))));
             app.manage(voice::VoiceState::default());
             voice::recover(app.handle());
             app.manage(FileLocks::default());
@@ -961,13 +1106,8 @@ pub fn run() {
             open_wikilink,
             note_context,
             ask_scopes,
-            vault_candidates,
-            install_base_files,
             ask_retrieve,
             open_vault_note,
-            obsidian_status,
-            open_in_obsidian,
-            obsidian_daily_append,
             launcher_info,
             get_settings,
             set_settings,
@@ -979,6 +1119,31 @@ pub fn run() {
             get_groq_key,
             groq_key_storage,
             set_groq_key,
+            notion_connected,
+            notion_connect,
+            notion_disconnect,
+            notion_test,
+            notion_search,
+            notion_create_page,
+            notion_read_page,
+            notion_pull,
+            notion_link,
+            notion_refresh,
+            notion_destination_fields,
+            notion_search_databases,
+            notion_schema,
+            notion_template,
+            notion_create_destination,
+            notion_destination,
+            notion_set_destination,
+            notion_clear_destination,
+            notion_preview_row,
+            notion_create_row,
+            notion_home,
+            notion_set_home,
+            notion_clear_home,
+            notion_push_plan,
+            notion_push,
             create_markdown_file,
             create_markdown_file_in,
             get_save_dir,
@@ -1067,53 +1232,3 @@ mod task_tests {
         assert_eq!(again.rows.iter().map(|r| r.title.as_str()).collect::<Vec<_>>(), vec!["first"]);
     }
 }
-
-#[cfg(test)]
-mod install_tests {
-    use super::*;
-    use std::fs;
-
-    fn vault(name: &str, with_obsidian: bool) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("mdc-install-{name}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&d);
-        fs::create_dir_all(&d).unwrap();
-        if with_obsidian {
-            fs::create_dir_all(d.join(".obsidian")).unwrap();
-        }
-        d
-    }
-
-    fn file(name: &str, content: &str) -> NewFile {
-        NewFile { name: name.into(), content: content.into() }
-    }
-
-    #[test]
-    fn installs_new_files_and_never_overwrites() {
-        let v = vault("ok", true);
-        let first = install_files(&v, "MC Dashboards", &[file("Meetings.base", "a: 1\n"), file("Speaking practice.base", "b: 2\n")]).unwrap();
-        assert_eq!(first.iter().map(|r| r.written).collect::<Vec<_>>(), vec![true, true]);
-        fs::write(v.join("MC Dashboards/Meetings.base"), "my edits\n").unwrap();
-        let second = install_files(&v, "MC Dashboards", &[file("Meetings.base", "a: 1\n"), file("New.base", "c: 3\n")]).unwrap();
-        assert_eq!(second, vec![InstallResult { name: "Meetings.base".into(), written: false }, InstallResult { name: "New.base".into(), written: true }]);
-        assert_eq!(fs::read_to_string(v.join("MC Dashboards/Meetings.base")).unwrap(), "my edits\n");
-        assert!(!v.join(".obsidian").read_dir().unwrap().any(|_| true), ".obsidian must stay untouched");
-    }
-
-    #[test]
-    fn refuses_folders_that_are_not_vaults_and_unsafe_names() {
-        let plain = vault("plain", false);
-        assert!(install_files(&plain, "MC Dashboards", &[file("A.base", "x")]).unwrap_err().contains("not an Obsidian vault"));
-        assert!(!plain.join("MC Dashboards").exists());
-        let v = vault("names", true);
-        for bad in ["../evil.base", "a/b.base", "x.md", ".hidden.base", " lead.base", "", ".base", "a\\b.base"] {
-            assert!(install_files(&v, "MC Dashboards", &[file(bad, "x")]).is_err(), "{bad}");
-        }
-        for bad in ["..", ".obsidian", "a/b", "", "x\\y"] {
-            assert!(install_files(&v, bad, &[file("A.base", "x")]).is_err(), "{bad}");
-        }
-        assert!(install_files(&v, "MC Dashboards", &[file("Big.base", &"x".repeat(20_001))]).is_err());
-        assert!(install_files(&v, "MC Dashboards", &[]).is_err());
-        assert!(!v.join("MC Dashboards").exists(), "validation must happen before anything is created");
-    }
-}
-

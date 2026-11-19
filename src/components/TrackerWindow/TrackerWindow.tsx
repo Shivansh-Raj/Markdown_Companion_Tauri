@@ -14,6 +14,7 @@ import {
 import { MarkdownRenderer } from "../MarkdownRenderer/MarkdownRenderer";
 import { ProgressBar } from "../ProgressBar/ProgressBar";
 import { AiEditPanel } from "../AiEdit/AiEditPanel";
+import { NotionSend } from "../Notion/NotionSend";
 import { AskPanel } from "../AiAsk/AskPanel";
 import { ContextPanel } from "../Context/ContextPanel";
 import { locateSelection } from "../../services/aiEdit";
@@ -39,12 +40,8 @@ export function TrackerWindow({ id }: { id: string }) {
   // AI edit: results land in the edit draft (never straight on disk); `aiUndo` holds earlier drafts.
   const [aiOpen, setAiOpen] = useState(false);
   const [askOpen, setAskOpen] = useState(false);
+  const [notionOpen, setNotionOpen] = useState(false);
   const [ctxOpen, setCtxOpen] = useState(false);
-  // Optional Obsidian handoff: the button only appears when the app is installed.
-  const [obsidianApp, setObsidianApp] = useState(false);
-  useEffect(() => {
-    api.obsidianStatus().then((s) => setObsidianApp(s.app_installed)).catch(() => {});
-  }, []);
   const [aiUndo, setAiUndo] = useState<string[]>([]);
   const [aiSelection, setAiSelection] = useState<{ start: number; end: number } | null>(null);
   const editorRef = useRef<HTMLTextAreaElement>(null);
@@ -254,6 +251,7 @@ export function TrackerWindow({ id }: { id: string }) {
         <button className="btn" onClick={openAi} onMouseDown={(e) => e.preventDefault()} disabled={!snap || unavailable || busy || aiOpen} aria-label="Edit with AI">AI</button>
         <button className="btn" onClick={() => setAskOpen(true)} disabled={!snap || askOpen || aiOpen} aria-label="Ask AI about this file" title="Ask a question about this file">ASK</button>
         <button className="btn" onClick={() => setCtxOpen((o) => !o)} disabled={!snap} aria-pressed={ctxOpen} aria-label="Show linked notes" title="Backlinks, links and tags">LINKS</button>
+        <button className="btn" onClick={() => setNotionOpen(true)} disabled={!snap || unavailable || notionOpen} aria-label="Send to Notion" title="Create a Notion page from this note">NOTION</button>
         {!editing && (
           <button className="btn" onClick={startEdit} disabled={!snap || unavailable} aria-label="Edit Markdown source">EDIT</button>
         )}
@@ -264,7 +262,6 @@ export function TrackerWindow({ id }: { id: string }) {
           id={id}
           refreshKey={snap?.hash ?? ""}
           onClose={() => setCtxOpen(false)}
-          onOpenInObsidian={obsidianApp ? () => api.openInObsidian(id).catch((e) => setNotice(String(e))) : undefined}
         />}
       {!editing && !aiOpen && !askOpen && doc && doc.total > 0 && <ProgressBar done={doc.done} total={doc.total} />}
       {unavailable && (
@@ -289,6 +286,7 @@ export function TrackerWindow({ id }: { id: string }) {
           <span className="hint">Cmd/Ctrl+S saves</span>
         </div>
       )}
+      {notionOpen && snap && <NotionSend noteId={id} content={draft ?? snap.content} fileName={info?.display_name ?? "note"} onClose={() => setNotionOpen(false)} />}
       {askOpen && snap ? (
         <AskPanel noteId={id} content={draft ?? snap.content} fileName={info?.display_name ?? "this file"} onClose={() => setAskOpen(false)} />
       ) : aiOpen && snap ? (

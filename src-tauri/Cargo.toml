@@ -27,6 +27,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 notify = "8.2.2"
 cpal = "0.15"
+# Blocking HTTPS client for the Notion API. Calls run in Rust so the token never reaches the web view.
+ureq = { version = "2", features = ["json"] }
 
 # OS credential storage for the API key. `keyring` needs an explicit backend per OS; without one it silently falls
 # back to an in-memory mock and the key would be lost.

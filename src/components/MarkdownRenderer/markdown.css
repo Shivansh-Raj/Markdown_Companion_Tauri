@@ -26,7 +26,7 @@
 .markdown th, .markdown td { border: 2px solid var(--border); padding: 3px 8px; text-align: left; }
 .markdown th { background: var(--accent); color: var(--accent-ink); font-family: var(--pixel); font-size: 11px; }
 
-/* Obsidian-flavoured extras */
+/* Extended Markdown extras */
 .properties { margin: 0 0 .8em; padding: 6px 8px; border: 2px solid var(--border); font-size: 12px; display: grid; gap: 3px; }
 .property { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
 .property dt { font-family: var(--pixel); font-size: 10px; color: var(--muted); min-width: 5.5em; }

@@ -53,6 +53,14 @@ describe("when a dialog is needed", () => {
     expect(skipsDialog([req()])).toBe(false);
   });
 
+  it("skips the open file only when allowed, and never for other notes", () => {
+    const own = req({ openFile: true });
+    expect(skipsDialog([own])).toBe(false);
+    expect(skipsDialog([own], true)).toBe(true);
+    expect(skipsDialog([req()], true)).toBe(false); // folder/vault requests are not marked openFile
+    expect(skipsDialog([own, req()], true)).toBe(false);
+  });
+
   it("remembers approval only for unchanged, reviewed text", () => {
     const a = fingerprint(req());
     expect(fingerprint(req({ user: req().user.replace("what?", "something else"), items: [{ label: "notes.md", text: "the file text" }, { label: "Your question", text: "something else", typed: true }] }))).toBe(a);

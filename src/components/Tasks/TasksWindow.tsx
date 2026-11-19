@@ -122,7 +122,7 @@ export function TasksWindow() {
                     <span className="tasks-meta">
                       <button className="tasks-note" onClick={() => openNote(r)} title={`${r.source}: ${r.rel}`}>{r.note}</button>
                       {r.due && <span className={r.due < today ? "tasks-due overdue" : "tasks-due"}>{shortDate(r.due)}</span>}
-                      {r.recurring && <span className="tasks-repeat" title="Repeats. Complete it in Obsidian so the next occurrence is created.">repeats</span>}
+                      {r.recurring && <span className="tasks-repeat" title="Repeats. Complete it in the app that manages it so the next occurrence is created.">repeats</span>}
                     </span>
                   </div>
                 </li>

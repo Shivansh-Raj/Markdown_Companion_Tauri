@@ -49,6 +49,36 @@ pub struct WindowState {
     pub open: bool,
 }
 
+/// Links a local file to a Notion page. The remote text at the last sync is kept as a snapshot file (see
+/// `Store::snapshot_dir`), not here, so this file stays small.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct NotionLink {
+    pub page_id: String,
+    pub url: String,
+    pub title: String,
+    /// Hash of the local file's text at the last sync.
+    pub local_hash: String,
+    /// Hash of the Notion page's Markdown at the last sync.
+    pub remote_hash: String,
+    pub synced_secs: u64,
+}
+
+/// The Notion page that holds everything Markdown Companion creates, chosen once by the user.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct NotionHome {
+    pub page_id: String,
+    pub title: String,
+    pub url: String,
+}
+
+/// A Notion database MC writes rows to (for meetings, practice sessions, tasks), and how MC's fields map onto its properties.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct NotionDestination {
+    pub data_source_id: String,
+    pub title: String,
+    pub mapping: Vec<crate::notion::db::MapEntry>,
+}
+
 #[derive(Serialize, Deserialize, Default, Clone, Debug)]
 #[serde(default)]
 pub struct Data {
@@ -61,6 +91,13 @@ pub struct Data {
     /// Folder for AI-created files; `None` means Documents/MarkdownCompanion.
     pub ai_save_dir: Option<String>,
     pub window_state: HashMap<String, WindowState>,
+    /// Local file id -> linked Notion page.
+    pub notion_links: HashMap<String, NotionLink>,
+    pub notion_home: Option<NotionHome>,
+    /// Section key (notes, meetings, …) -> the Notion page created for it under the home page.
+    pub notion_sections: HashMap<String, String>,
+    /// Destination key (meetings, practice, tasks) -> database and mapping.
+    pub notion_destinations: HashMap<String, NotionDestination>,
     next_id: u64,
 }
 
@@ -188,6 +225,63 @@ impl Store {
 
     pub fn files(&self) -> Vec<TrackedFile> {
         self.0.data.lock().unwrap().files.clone()
+    }
+
+    pub fn notion_home(&self) -> Option<NotionHome> {
+        self.0.data.lock().unwrap().notion_home.clone()
+    }
+
+    /// Choosing a different home page forgets the old sections, since they live under the old one.
+    pub fn set_notion_home(&self, home: Option<NotionHome>) -> Result<(), String> {
+        self.update(|d| {
+            d.notion_home = home;
+            d.notion_sections.clear();
+        })
+    }
+
+    pub fn notion_destination(&self, key: &str) -> Option<NotionDestination> {
+        self.0.data.lock().unwrap().notion_destinations.get(key).cloned()
+    }
+
+    pub fn set_notion_destination(&self, key: &str, dest: Option<NotionDestination>) -> Result<(), String> {
+        self.update(|d| match dest {
+            Some(v) => {
+                d.notion_destinations.insert(key.to_string(), v);
+            }
+            None => {
+                d.notion_destinations.remove(key);
+            }
+        })
+    }
+
+    pub fn notion_section(&self, key: &str) -> Option<String> {
+        self.0.data.lock().unwrap().notion_sections.get(key).cloned()
+    }
+
+    pub fn set_notion_section(&self, key: &str, page_id: &str) -> Result<(), String> {
+        self.update(|d| {
+            d.notion_sections.insert(key.to_string(), page_id.to_string());
+        })
+    }
+
+    pub fn notion_link(&self, file_id: &str) -> Option<NotionLink> {
+        self.0.data.lock().unwrap().notion_links.get(file_id).cloned()
+    }
+
+    /// The file already linked to this Notion page, if any (prevents pulling the same page twice).
+    pub fn file_for_notion_page(&self, page_id: &str) -> Option<String> {
+        self.0.data.lock().unwrap().notion_links.iter().find(|(_, l)| l.page_id == page_id).map(|(k, _)| k.clone())
+    }
+
+    pub fn set_notion_link(&self, file_id: &str, link: NotionLink) -> Result<(), String> {
+        self.update(|d| {
+            d.notion_links.insert(file_id.to_string(), link);
+        })
+    }
+
+    /// Where the Markdown of each linked page, as of the last sync, is kept.
+    pub fn snapshot_dir(&self) -> PathBuf {
+        self.0.path.parent().map(|p| p.join("notion-snapshots")).unwrap_or_else(|| PathBuf::from("notion-snapshots"))
     }
 
     pub fn get(&self, id: &str) -> Option<TrackedFile> {

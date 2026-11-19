@@ -4,7 +4,7 @@ import { MarkdownRenderer } from "../MarkdownRenderer/MarkdownRenderer";
 import { streamChat } from "../../services/ai";
 import { useReceipt } from "../Receipt/ReceiptProvider";
 import {
-  askHistoryText, buildAskSystemPrompt, buildAskUserPrompt, buildScopedSystemPrompt, buildScopedUserPrompt, isNotFound, limitDoc,
+  askHistoryText, buildAskSystemPrompt, buildAskUserPrompt, buildScopedSystemPrompt, buildScopedUserPrompt, isNotFound, excerptForAsk,
   parseAskAnswer, parseScopedAnswer, retrievalQuery, type ParsedAnswer, type Turn,
 } from "../../services/aiAsk";
 import type { AskScopes } from "../../types";
@@ -38,7 +38,7 @@ export function AskPanel({ noteId, content, fileName, onClose }: { noteId?: stri
   const abort = useRef<AbortController | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
-  const { text: doc, truncated } = limitDoc(content);
+  const [partial, setPartial] = useState<string | null>(null);
   const approve = useReceipt();
 
   useEffect(() => () => abort.current?.abort(), []);
@@ -65,10 +65,15 @@ export function AskPanel({ noteId, content, fileName, onClose }: { noteId?: stri
     let system: string;
     let user: string;
     let reqItems: { label: string; text: string; typed?: boolean; note?: string }[];
+    let doc = "";
     if (scope === "note" || !noteId) {
+      const ex = excerptForAsk(content, text);
+      doc = ex.text;
+      const note = ex.partial ? `This file is long, so only the most relevant parts are sent (${ex.sent} of ${ex.total} pieces). Groq's free plan limits how much it takes per minute.` : undefined;
+      setPartial(note ?? null);
       system = buildAskSystemPrompt();
       user = buildAskUserPrompt(text, turns, doc);
-      reqItems = [{ label: `${fileName}${truncated ? " (first part of the file)" : " (whole file)"}`, text: doc, note: truncated ? "The file is very long, so only the first part is sent." : undefined }];
+      reqItems = [{ label: `${fileName}${ex.partial ? " (the most relevant parts)" : " (whole file)"}`, text: doc, note }];
     } else {
       // Retrieval happens on this computer. Nothing is sent until the receipt below is approved.
       let found;
@@ -91,6 +96,7 @@ export function AskPanel({ noteId, content, fileName, onClose }: { noteId?: stri
     }
     const approved = await approve([{
       purpose: scope === "note" || !noteId ? `Ask about ${fileName}` : `Ask ${where}`, system, user, mode: "review",
+      openFile: scope === "note" || !noteId,
       items: [
         ...reqItems,
         ...(turns.length ? [{ label: "Earlier answers in this chat", text: askHistoryText(turns) }] : []),
@@ -158,7 +164,7 @@ export function AskPanel({ noteId, content, fileName, onClose }: { noteId?: stri
           : "Only the passages that best match your question are sent, and you review them first. Quotes are checked against those passages and name their note."}
         {scope !== "note" && excluded > 0 && ` ${excluded} note${excluded === 1 ? " is" : "s are"} never sent (marked ai: false).`}
       </p>
-      {scope === "note" && truncated && <div className="error" role="status">This file is very long, so only the first part was searched.</div>}
+      {scope === "note" && partial && <div className="error" role="status">{partial}</div>}
 
       <div className="ask-log" ref={scroller} aria-live="polite">
         {items.length === 0 && live === null && (

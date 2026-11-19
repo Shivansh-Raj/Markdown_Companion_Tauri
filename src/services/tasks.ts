@@ -1,4 +1,4 @@
-import { wikilinkLabel } from "./obsidian";
+import { wikilinkLabel } from "./markdownExtras";
 import type { TaskRow } from "../types";
 
 export type TaskGroupId = "overdue" | "today" | "upcoming" | "none";

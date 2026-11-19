@@ -2,7 +2,7 @@ import { createContext, useContext, useState, type ComponentProps, type ReactNod
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkFrontmatter from "remark-frontmatter";
-import { extractFrontmatter, parseFrontmatter, remarkObsidian } from "../../services/obsidian";
+import { extractFrontmatter, parseFrontmatter, remarkExtras } from "../../services/markdownExtras";
 import type { ParsedDoc, TaskInfo } from "../../services/markdownParser";
 import { TaskCheckbox } from "../TaskCheckbox/TaskCheckbox";
 import { CodeBlock } from "./CodeBlock";
@@ -174,14 +174,14 @@ const components: Components = {
   },
 };
 
-/** Theme-independent renderer: CommonMark + GFM + Obsidian-flavoured extras (properties, wikilinks, callouts, tags, highlights). Raw HTML is never rendered as HTML. */
+/** Theme-independent renderer: CommonMark + GFM + extras (properties, wikilinks, callouts, tags, highlights). Raw HTML is never rendered as HTML. */
 export function MarkdownRenderer({ source, onOpenLink, onOpenWikilink, doc, onToggleTask, busy }: MarkdownRendererProps) {
   const frontmatter = extractFrontmatter(source);
   return (
     <RenderContext.Provider value={{ onOpenLink, onOpenWikilink, doc, onToggleTask, busy }}>
       <div className="markdown">
         {frontmatter !== null && <Properties yaml={frontmatter} />}
-        <ReactMarkdown remarkPlugins={[remarkFrontmatter, remarkGfm, remarkObsidian]} components={components}>
+        <ReactMarkdown remarkPlugins={[remarkFrontmatter, remarkGfm, remarkExtras]} components={components}>
           {source}
         </ReactMarkdown>
       </div>

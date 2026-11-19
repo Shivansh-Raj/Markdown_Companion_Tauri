@@ -1,0 +1,18 @@
+.notion-send { max-height: 70%; overflow-y: auto; }
+.notion-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.notion-parent { display: flex; align-items: center; gap: 6px; }
+.notion-parent span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notion-hits { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 140px; overflow-y: auto; }
+.notion-hits .btn { width: 100%; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.notion-notes { margin: 0; padding-left: 18px; font-size: 12px; color: var(--muted); }
+.notion-open { display: flex; flex-direction: column; gap: 8px; padding: 10px; }
+.notion-diff { display: flex; flex-direction: column; gap: 4px; }
+.notion-diff-label { font-family: var(--pixel); font-size: 10px; color: var(--muted); }
+.notion-diff pre { margin: 0; padding: 6px; max-height: 120px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 11px; border: 2px solid var(--border); }
+.notion-diff-old { background: color-mix(in srgb, var(--surface) 85%, red); }
+.notion-diff-new { background: color-mix(in srgb, var(--surface) 85%, green); }
+.notion-dest { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.notion-map { display: flex; flex-direction: column; gap: 6px; }
+.notion-map-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.notion-map-row span { flex: 0 0 42%; min-width: 0; }
+.notion-map-row select { flex: 1; min-width: 0; }

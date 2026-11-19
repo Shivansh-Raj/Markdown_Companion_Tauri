@@ -22,6 +22,103 @@ export function buildAskSystemPrompt(): string {
   );
 }
 
+/**
+ * Groq's free tier allows about 8,000 tokens a minute for the default model, answer included. About 14,000
+ * characters of document plus the prompt stays safely under that.
+ */
+export const ASK_BUDGET_CHARS = 14_000;
+const CHUNK_MAX = 1_500;
+const GAP = "\n\n[…]\n\n";
+const FILLER = new Set(("the and what this that file with for from about summarise summarize summary tell give list bullet bullets three two four five main points " +
+  "who how why when where which does did are was were has have had can could would should into than then them they their there here please").split(" "));
+
+interface Chunk { index: number; heading: number; text: string }
+
+/** Splits Markdown into pieces at headings, and long sections at blank lines. */
+function chunkDoc(content: string): Chunk[] {
+  const out: Chunk[] = [];
+  let section = -1;
+  let buf: string[] = [];
+  const flush = () => {
+    const text = buf.join("\n").trim();
+    buf = [];
+    if (!text) return;
+    if (text.length <= CHUNK_MAX) { out.push({ index: out.length, heading: section, text }); return; }
+    let cur = "";
+    const push = (t: string) => out.push({ index: out.length, heading: section, text: t });
+    for (const para of text.split(/\n\s*\n/)) {
+      if (para.length > CHUNK_MAX) {
+        // an oversize paragraph is cut into pieces; whatever came before it (a heading) stays with the first piece
+        let rest = para;
+        if (cur) {
+          const room = Math.max(0, CHUNK_MAX - cur.length - 2);
+          push(`${cur}\n\n${rest.slice(0, room)}`);
+          rest = rest.slice(room);
+          cur = "";
+        }
+        for (let i = 0; i < rest.length; i += CHUNK_MAX) push(rest.slice(i, i + CHUNK_MAX));
+        continue;
+      }
+      if (cur && cur.length + para.length + 2 > CHUNK_MAX) { push(cur); cur = ""; }
+      cur = cur ? `${cur}\n\n${para}` : para;
+    }
+    if (cur) out.push({ index: out.length, heading: section, text: cur });
+  };
+  for (const line of content.split("\n")) {
+    if (/^#{1,6}\s/.test(line)) { flush(); section++; }
+    buf.push(line);
+  }
+  flush();
+  return out;
+}
+
+export interface Excerpt { text: string; partial: boolean; sent: number; total: number }
+
+/**
+ * A file that fits the budget is sent whole. A longer one is cut down to the parts most likely to answer the
+ * question (by shared words); for a general question ("summarise this") it takes the start of every section instead.
+ * Pieces stay in file order, and gaps are marked.
+ */
+export function excerptForAsk(content: string, question: string, budget = ASK_BUDGET_CHARS): Excerpt {
+  if (content.length <= budget) return { text: content, partial: false, sent: 1, total: 1 };
+  const chunks = chunkDoc(content);
+  const words = [...new Set((question.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []).filter((w) => !FILLER.has(w)))];
+  const scored = chunks.map((c) => {
+    const low = c.text.toLowerCase();
+    return { c, score: words.filter((w) => low.includes(w)).length };
+  });
+  const picked: Chunk[] = [];
+  if (words.length > 0 && scored.some((s) => s.score > 0)) {
+    let used = 0;
+    for (const { c } of [...scored].sort((x, y) => y.score - x.score || x.c.index - y.c.index).filter((s) => s.score > 0)) {
+      const cost = c.text.length + GAP.length;
+      if (used + cost > budget) continue;
+      picked.push(c);
+      used += cost;
+    }
+  } else {
+    // General question: the opening of every section, each cut to its share of the budget. If there are too many
+    // sections for that, every few sections are skipped so the whole file is still covered.
+    const firsts: Chunk[] = [];
+    const seen = new Set<number>();
+    for (const c of chunks) if (!seen.has(c.heading)) { seen.add(c.heading); firsts.push(c); }
+    const MIN_PIECE = 250;
+    const keep = Math.max(1, Math.min(firsts.length, Math.floor((budget - 100) / (MIN_PIECE + GAP.length))));
+    const stride = firsts.length / keep;
+    const chosen = Array.from({ length: keep }, (_, i) => firsts[Math.floor(i * stride)]);
+    const per = Math.floor((budget - 100) / chosen.length) - GAP.length; // 100 spare for the leading marker
+    for (const c of chosen) {
+      const cut = c.text.length > per ? c.text.slice(0, per).replace(/\s+\S*$/, "") : c.text;
+      picked.push({ ...c, text: cut || c.text.slice(0, per) });
+    }
+  }
+  picked.sort((a, b) => a.index - b.index);
+  let text = "";
+  picked.forEach((c, i) => { text += (i > 0 ? (c.index === picked[i - 1].index + 1 ? "\n\n" : GAP) : "") + c.text; });
+  if (picked[0] && picked[0].index > 0) text = `[…]\n\n${text}`;
+  return { text: text.slice(0, budget), partial: true, sent: picked.length, total: chunks.length };
+}
+
 export function limitDoc(content: string): { text: string; truncated: boolean } {
   if (content.length <= MAX_ASK_CHARS) return { text: content, truncated: false };
   const cut = content.slice(0, MAX_ASK_CHARS);

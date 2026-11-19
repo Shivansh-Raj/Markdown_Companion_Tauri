@@ -69,17 +69,6 @@ export interface NoteContext {
 /** Where the Groq key is stored. `file` means it is unprotected in the app data file; `warning` says why. */
 export type KeyStorage = { kind: "none" } | { kind: "keychain" } | { kind: "file"; warning: string };
 
-export interface VaultCandidate {
-  path: string;
-  name: string;
-}
-
-export interface InstallResult {
-  name: string;
-  /** False when the file already existed; it is never overwritten. */
-  written: boolean;
-}
-
 export interface AskScopes {
   vault_name: string;
   is_vault: boolean;
@@ -114,3 +103,28 @@ export interface TasksView {
   sources: string[];
   truncated: boolean;
 }
+
+export interface NotionMe { name: string; workspace: string }
+export interface NotionHit { id: string; title: string; url: string }
+export interface NotionCreated { id: string; url: string }
+export interface NotionPage { markdown: string; truncated: boolean; unknown_block_ids: string[] }
+export interface NotionSent { id: string; url: string; linked: boolean }
+export interface NotionPulled { file_id: string; title: string; unknown_blocks: number; existing: boolean }
+export interface NotionLinkInfo { page_id: string; url: string; title: string; synced_secs: number; local_changed: boolean }
+export type NotionSyncState = "in_sync" | "local_changed" | "remote_changed" | "both";
+export interface NotionRefreshed { state: NotionSyncState; updated: boolean }
+export type NotionPushPlan =
+  | { kind: "nothing_to_send" }
+  | { kind: "remote_changed"; both: boolean }
+  | { kind: "ready"; old_str: string; new_str: string; local_hash: string };
+export interface NotionPushed { warnings: string[] }
+export interface NotionHome { page_id: string; title: string; url: string }
+export type NotionFieldKind = "text" | "number" | "date" | "list" | "relation";
+export interface NotionField { key: string; label: string; kind: NotionFieldKind }
+export interface NotionProp { id: string; name: string; type: string; options: string[] }
+export interface NotionSchema { id: string; title: string; properties: NotionProp[] }
+export interface NotionMapEntry { field: string; property: string }
+export interface NotionDestination { data_source_id: string; title: string; mapping: NotionMapEntry[] }
+export interface NotionRowPreview { database: string; properties: Record<string, unknown>; warnings: string[] }
+export interface NotionRowCreated { id: string; url: string; warnings: string[]; linked: boolean }
+export interface NotionTemplate { title: string; columns: [string, string][] }

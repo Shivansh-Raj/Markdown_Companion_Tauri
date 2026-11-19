@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MarkdownRenderer } from "../components/MarkdownRenderer/MarkdownRenderer";
-import { extractFrontmatter, parseFrontmatter, wikilinkLabel } from "./obsidian";
+import { extractFrontmatter, parseFrontmatter, wikilinkLabel } from "./markdownExtras";
 import { listSections, parseDocument } from "./markdownParser";
 
 const render = (s: string) => renderToStaticMarkup(<MarkdownRenderer source={s} />);

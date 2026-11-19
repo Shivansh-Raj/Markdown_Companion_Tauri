@@ -3,9 +3,10 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "../../services/api";
 import { acceleratorFromEvent, prettyAccelerator } from "../../services/accelerator";
 import { THEME_OPTIONS } from "../../services/themeContext";
+import { setSkipOpenFileReview, skipOpenFileReview } from "../../services/aiPrefs";
+import { NotionSettings } from "./NotionSettings";
 import { testKey } from "../../services/ai";
 import { animationsEnabled, setAnimationsEnabled } from "../../services/animations";
-import { DashboardsInstaller } from "./DashboardsInstaller";
 import type { KeyStorage, Settings as SettingsModel, ThemeName } from "../../types";
 
 const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
@@ -21,6 +22,7 @@ export function Settings({ onBack, onChanged }: { onBack: () => void; onChanged:
   const [keyStorage, setKeyStorage] = useState<KeyStorage>({ kind: "none" });
   const [saveDir, setSaveDir] = useState("");
   const [anim, setAnim] = useState(animationsEnabled());
+  const [skipReview, setSkipReview] = useState(skipOpenFileReview());
 
   useEffect(() => {
     api.getGroqKey().then((k) => setHasKey(!!k)).catch(() => {});
@@ -193,13 +195,27 @@ export function Settings({ onBack, onChanged }: { onBack: () => void; onChanged:
         </p>
       )}
       {keyStorage.kind === "none" && <p className="note">Saved in your system's secure credential store and sent only to api.groq.com.</p>}
+      <label>
+        <input
+          type="checkbox"
+          checked={!skipReview}
+          onChange={(e) => {
+            setSkipReview(!e.target.checked);
+            setSkipOpenFileReview(!e.target.checked);
+          }}
+        />
+        Review before sending the open file to the AI
+      </label>
+      <p className="note">Off: Ask and Edit send the open file straight away. Questions across folders or vaults always show what will be sent.</p>
+
       <h2>AI FILES SAVE TO</h2>
       <div className="folder">
         <span title={saveDir}>{saveDir}</span>
         <button className="btn" onClick={() => void chooseSaveDir(false)}>CHANGE</button>
         <button className="btn" onClick={() => void chooseSaveDir(true)}>DEFAULT</button>
       </div>
-      <DashboardsInstaller />
+
+      <NotionSettings />
 
       <h2>MOTION</h2>
       <label>

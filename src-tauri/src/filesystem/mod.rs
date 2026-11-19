@@ -97,7 +97,7 @@ impl FileLocks {
     /// Toggles a task found by an index rather than by a snapshot the caller holds. Under the file lock it re-reads the
     /// file and checks that the marker is where the index said and that the line still contains `expect` (the task
     /// text as indexed). If the file changed in between it writes nothing and returns `Stale`. Recurring tasks
-    /// (`🔁`) are refused: completing one creates the next occurrence in Obsidian's Tasks, which a flip cannot do.
+    /// (`🔁`) are refused: completing one creates the next occurrence in task-plugin semantics, which a flip cannot do.
     pub fn toggle_task_verified(&self, path: &Path, offset: usize, expect: &str, checked: bool) -> Result<FileSnapshot, ToggleError> {
         let lock = self.lock_for(path);
         let _guard = lock.lock().unwrap();
@@ -121,7 +121,7 @@ impl FileLocks {
             return Err(stale());
         }
         if line.contains('🔁') {
-            return Err(failed("This task repeats. Complete it in Obsidian so the next occurrence is created."));
+            return Err(failed("This task repeats. Complete it in the app that manages it so the next occurrence is created."));
         }
         let updated = apply_toggle(content, offset, checked).map_err(|_| stale())?;
         write_atomic(path, updated.as_bytes(), &meta).map_err(|e| failed(format!("Cannot save file: {e}")))?;

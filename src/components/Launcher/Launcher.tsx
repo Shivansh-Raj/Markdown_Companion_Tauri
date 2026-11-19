@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "../../services/api";
 import { prettyAccelerator } from "../../services/accelerator";
 import { filterFiles } from "../../services/search";
+import { NotionOpen } from "../Notion/NotionOpen";
 import { Settings } from "../Settings/Settings";
 import { AiCreate } from "../AiCreate/AiCreate";
 import { TypingCat } from "../AiCreate/TypingCat";
@@ -27,7 +28,7 @@ export function Launcher() {
   const [selected, setSelected] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<LauncherInfo | null>(null);
-  const [view, setView] = useState<"list" | "settings" | "ai">("list");
+  const [view, setView] = useState<"list" | "settings" | "ai" | "notion">("list");
   const input = useRef<HTMLInputElement>(null);
 
   const refresh = useCallback(async () => {
@@ -108,7 +109,7 @@ export function Launcher() {
     if ((e.metaKey || e.ctrlKey) && e.key === ",") {
       e.preventDefault();
       setView((v) => (v === "settings" ? "list" : "settings"));
-    } else if (view === "settings" || view === "ai") {
+    } else if (view === "settings" || view === "ai" || view === "notion") {
       return; // these panels handle their own keys
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
@@ -146,6 +147,15 @@ export function Launcher() {
         <AiCreate
           onBack={() => setView("list")}
           onCreated={() => {
+            void refresh().catch(() => {});
+            setView("list");
+            void api.hideLauncher();
+          }}
+        />
+      ) : view === "notion" ? (
+        <NotionOpen
+          onBack={() => setView("list")}
+          onOpened={() => {
             void refresh().catch(() => {});
             setView("list");
             void api.hideLauncher();
@@ -222,6 +232,7 @@ export function Launcher() {
                 <button className="btn primary" onClick={() => void addFile()}>+ ADD FILE</button>
               </span>
               <button className="btn" onClick={() => setView("ai")}>✎ NEW WITH AI</button>
+              <button className="btn" onClick={() => setView("notion")} title="Open a Notion page as a note">▤ NOTION</button>
               <button className="btn" onClick={() => void api.openTasksWindow().then(() => api.hideLauncher()).catch((e) => setError(String(e)))}>
                 ☑ TASKS
               </button>

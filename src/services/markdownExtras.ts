@@ -1,7 +1,7 @@
 import type { Root, RootContent, Parent, Text, PhrasingContent } from "mdast";
 
 /**
- * Obsidian-flavoured Markdown support ("OFM-lite"), implemented as pure functions plus a remark
+ * Extended Markdown support (frontmatter properties, wikilinks, callouts, highlights, tags), implemented as pure functions plus a remark
  * plugin that only rewrites the syntax tree. The source text is never changed, so the source
  * offsets used for task toggling and section progress stay valid.
  */
@@ -168,7 +168,7 @@ export function extractFrontmatter(source: string): string | null {
  * Remark plugin. The `yaml` node (from remark-frontmatter) is removed so it never renders as
  * text; the renderer shows it separately as properties.
  */
-export function remarkObsidian() {
+export function remarkExtras() {
   return (tree: Root) => {
     tree.children = tree.children.filter((n) => (n as { type: string }).type !== "yaml");
     walk(tree);

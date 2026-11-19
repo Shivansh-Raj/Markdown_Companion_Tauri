@@ -1,4 +1,4 @@
-//! Secret storage for the Groq API key: the OS credential store (macOS Keychain, Windows Credential Manager).
+//! Secret storage for API keys and tokens (Groq, Notion): the OS credential store (macOS Keychain, Windows Credential Manager).
 //! Other platforms report "unavailable", and the caller falls back to the app data file with a visible warning.
 
 pub trait SecretStore: Send + Sync {
@@ -9,30 +9,37 @@ pub trait SecretStore: Send + Sync {
 }
 
 const SERVICE: &str = "com.markdowncompanion.app";
-const ACCOUNT: &str = "groq-api-key";
+const GROQ_ACCOUNT: &str = "groq-api-key";
+const NOTION_ACCOUNT: &str = "notion-token";
 
 /// The operating system's credential store.
 pub struct Keychain {
     service: String,
+    account: String,
 }
 
 impl Keychain {
     /// Unused in test builds, which use `MemorySecrets` so tests never touch the real credential store.
     #[cfg_attr(test, allow(dead_code))]
     pub fn new() -> Self {
-        Keychain { service: SERVICE.to_string() }
+        Keychain { service: SERVICE.to_string(), account: GROQ_ACCOUNT.to_string() }
+    }
+
+    /// The Notion connection token. Kept under its own account, never in the app data file.
+    pub fn notion() -> Self {
+        Keychain { service: SERVICE.to_string(), account: NOTION_ACCOUNT.to_string() }
     }
 
     #[cfg(test)]
     fn with_service(service: &str) -> Self {
-        Keychain { service: service.to_string() }
+        Keychain { service: service.to_string(), account: GROQ_ACCOUNT.to_string() }
     }
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 impl SecretStore for Keychain {
     fn get(&self) -> Result<Option<String>, String> {
-        match keyring::Entry::new(&self.service, ACCOUNT).map_err(|e| e.to_string())?.get_password() {
+        match keyring::Entry::new(&self.service, &self.account).map_err(|e| e.to_string())?.get_password() {
             Ok(v) => Ok(Some(v)),
             Err(keyring::Error::NoEntry) => Ok(None),
             Err(e) => Err(e.to_string()),
@@ -40,11 +47,11 @@ impl SecretStore for Keychain {
     }
 
     fn set(&self, value: &str) -> Result<(), String> {
-        keyring::Entry::new(&self.service, ACCOUNT).map_err(|e| e.to_string())?.set_password(value).map_err(|e| e.to_string())
+        keyring::Entry::new(&self.service, &self.account).map_err(|e| e.to_string())?.set_password(value).map_err(|e| e.to_string())
     }
 
     fn delete(&self) -> Result<(), String> {
-        match keyring::Entry::new(&self.service, ACCOUNT).map_err(|e| e.to_string())?.delete_credential() {
+        match keyring::Entry::new(&self.service, &self.account).map_err(|e| e.to_string())?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(e) => Err(e.to_string()),
         }
@@ -54,7 +61,7 @@ impl SecretStore for Keychain {
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 impl SecretStore for Keychain {
     fn get(&self) -> Result<Option<String>, String> {
-        let _ = (&self.service, ACCOUNT);
+        let _ = (&self.service, &self.account);
         Err("No secure credential store is available on this platform".into())
     }
     fn set(&self, _: &str) -> Result<(), String> {

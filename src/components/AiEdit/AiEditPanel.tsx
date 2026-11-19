@@ -87,7 +87,7 @@ export function AiEditPanel({ content, currentHash, selection, onApply, onClose 
     const user = buildEditUserPrompt(instruction, text);
     const where = scope.kind === "selection" ? "Selected text" : scope.kind === "section" ? `Section "${scope.section.title}"` : "Whole file";
     const approved = await approve([{
-      purpose: "Edit with AI", system, user, mode: "review",
+      purpose: "Edit with AI", system, user, mode: "review", openFile: true,
       items: [{ label: where, text }, { label: "Your instruction", text: instruction.trim(), typed: true }],
     }]);
     if (!approved) return; // declined: nothing was sent
