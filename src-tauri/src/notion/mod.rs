@@ -13,6 +13,7 @@ pub mod db;
 pub mod dest;
 pub mod edit;
 pub mod askdb;
+pub mod briefing;
 pub mod home;
 pub mod tasks;
 pub mod sync;

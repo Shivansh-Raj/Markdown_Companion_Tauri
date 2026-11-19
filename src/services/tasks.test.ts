@@ -50,7 +50,7 @@ describe("task grouping", () => {
 });
 
 describe("groupNotionTasks", () => {
-  const nrow = (id: string, title: string, due: string | null, owner: string | null = null) => ({ id, title, due, status: "Not started", owner, url: "" });
+  const nrow = (id: string, title: string, due: string | null, owner: string | null = null) => ({ id, title, due, status: "Not started", owner, url: "", meeting_ids: [] as string[] });
   it("groups by due date like local tasks and filters by title, owner or status", () => {
     const rows = [nrow("1", "later", "2026-12-05"), nrow("2", "late", "2026-11-01"), nrow("3", "today", "2026-11-20", "Sam"), nrow("4", "someday", null)];
     expect(groupNotionTasks(rows, "2026-11-20").map((g) => [g.id, g.rows.map((r) => r.title)])).toEqual([

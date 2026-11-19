@@ -17,6 +17,8 @@ export interface PriorItem {
   /** From the Markdown checkbox in a tracked file, when the item could be found there. */
   state: ItemState;
   file?: string;
+  /** Set for tasks read from the Notion Tasks database: what is needed to mark one done after a suggestion is accepted. */
+  notion?: { page: string; status: string | null; doneStatus: string | null; url: string };
 }
 
 export type FollowStatus = "resolved" | "discussed_open" | "delayed" | "not_mentioned";

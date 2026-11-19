@@ -129,5 +129,6 @@ export interface NotionRowPreview { database: string; properties: Record<string,
 export interface NotionRowCreated { id: string; url: string; warnings: string[]; linked: boolean }
 export interface NotionTemplate { title: string; columns: [string, string][] }
 export interface NotionDbPages { database: string; rows: number; pages: { id: string; title: string; url: string; markdown: string }[] }
-export interface NotionTask { id: string; title: string; due: string | null; status: string | null; owner: string | null; url: string }
-export interface NotionTasksView { database: string; rows: NotionTask[]; truncated: boolean; done_status: string | null; read_only_reason: string | null }
+export interface NotionTask { id: string; title: string; due: string | null; status: string | null; owner: string | null; url: string; meeting_ids: string[] }
+export interface NotionBriefing { database: string; meetings: { title: string; date: string; url: string; decisions: string[] }[]; latest_instead: boolean; tasks: NotionTask[]; tasks_note: string | null }
+export interface NotionTasksView { database: string; rows: NotionTask[]; truncated: boolean; done_status: string | null; read_only_reason: string | null; links_meetings: boolean }

@@ -8,6 +8,7 @@ import {
 } from "../../services/voice/transcript";
 import { MODE_LABELS, type SessionMeta, type VoiceDevice, type VoiceMode } from "../../services/voice/types";
 import { AnalysisPanel } from "./AnalysisPanel";
+import { BriefingCard } from "./BriefingCard";
 import { FollowUpPanel } from "./FollowUpPanel";
 import { PracticePanel } from "./PracticePanel";
 import { useQuestions } from "./useQuestions";
@@ -210,6 +211,7 @@ export function VoiceWindow() {
               <>
                 <input className="search" style={{ margin: "6px 0" }} placeholder="Title (optional)" aria-label="Session title"
                   value={title} onChange={(e) => setTitle(e.target.value)} />
+                {mode === "meeting" && <BriefingCard initialTopic={title} />}
                 <label className="note" htmlFor="mic">MICROPHONE</label>
                 <select id="mic" className="search" style={{ margin: "4px 0 10px" }} value={device} onChange={(e) => setDevice(e.target.value)}>
                   {devices.length === 0 && <option value="">No microphone found</option>}

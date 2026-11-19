@@ -114,3 +114,16 @@ describe("live question suggestions", () => {
     expect(buildQuestionSystemPrompt()).toMatch(/\[\]/);
   });
 });
+
+describe("Notion tasks in the follow-up check", () => {
+  it("lists a Notion task with its source and due date, and reads the model's answer for it", async () => {
+    const { priorItemsText, toFollowUps } = await import("./followups");
+    const item = { id: "notion:abc", task: "Send notes", owner: "Sam", deadline: "2026-12-01", meetingTitle: "Notion: Tasks", meetingDate: "2026-12-01", state: "open" as const,
+      notion: { page: "abc", status: "Not started", doneStatus: "Done", url: "u" } };
+    expect(priorItemsText([item])).toContain("Send notes");
+    const raw = JSON.stringify([{ id: "notion:abc", status: "resolved", evidence: "we sent the notes", note: "done" }]);
+    const r = toFollowUps(raw, [item], "yes we sent the notes yesterday");
+    expect(r.results[0]).toMatchObject({ id: "notion:abc", status: "resolved" });
+    expect(toFollowUps(raw, [item], "nothing relevant").results[0].status).not.toBe("resolved");
+  });
+});

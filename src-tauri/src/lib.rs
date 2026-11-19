@@ -741,6 +741,17 @@ async fn notion_db_pages(
     notion_call(state.inner(), move |c| notion::askdb::pages_for(c, &data_source, &question)).await
 }
 
+/// A briefing for a meeting topic: earlier matching meetings, their decisions and linked open tasks. Read only, no AI.
+#[tauri::command]
+async fn notion_briefing(
+    topic: String,
+    state: State<'_, std::sync::Arc<notion::NotionState>>,
+    store: State<'_, Store>,
+) -> Result<notion::briefing::Briefing, String> {
+    let st = store.inner().clone();
+    notion_call(state.inner(), move |c| notion::briefing::briefing(c, &st, &topic)).await
+}
+
 #[tauri::command]
 fn notion_home(store: State<Store>) -> Option<store::NotionHome> {
     store.notion_home()
@@ -1175,6 +1186,7 @@ pub fn run() {
             notion_tasks,
             notion_task_set_status,
             notion_db_pages,
+            notion_briefing,
             notion_home,
             notion_set_home,
             notion_clear_home,

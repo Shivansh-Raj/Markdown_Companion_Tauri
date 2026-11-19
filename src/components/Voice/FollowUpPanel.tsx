@@ -38,6 +38,16 @@ export function FollowUpPanel({ meta, chunks, ready }: { meta: SessionMeta; chun
   const [status, setStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  // Notion tasks the transcript suggests are finished. Marking one done is a separate click, and only if it is unchanged in Notion.
+  const [marked, setMarked] = useState<Record<string, string>>({}); // item id -> "done" | message
+  const markDone = async (item: PriorItem) => {
+    if (!item.notion?.doneStatus) return;
+    setMarked((m) => ({ ...m, [item.id]: "…" }));
+    try {
+      const out = await api.notionTaskSetStatus(item.notion.page, item.notion.status, item.notion.doneStatus);
+      setMarked((m) => ({ ...m, [item.id]: out === "done" ? "done" : "That task changed in Notion since this check, so nothing was written." }));
+    } catch (e) { setMarked((m) => ({ ...m, [item.id]: String(e) })); }
+  };
   const abort = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -73,7 +83,18 @@ export function FollowUpPanel({ meta, chunks, ready }: { meta: SessionMeta; chun
           items.push({ id: `${s.id}-${n}`, task: a.task, owner: a.owner, deadline: a.deadline, meetingTitle: s.title, meetingDate: dateStamp(s.createdAtMs), state: "unknown" });
         }
       }
-      if (!items.length) {
+      // Open tasks from your Notion Tasks database join the comparison. They are never changed by the check itself.
+      const notionItems: PriorItem[] = [];
+      try {
+        if (await api.notionConnected() && await api.notionDestination("tasks")) {
+          const view = await api.notionTasks();
+          for (const t of view.rows.slice(0, 20)) {
+            notionItems.push({ id: `notion:${t.id}`, task: t.title, owner: t.owner, deadline: t.due, meetingTitle: `Notion: ${view.database}`, meetingDate: t.due ?? "",
+              state: "open", notion: { page: t.id, status: t.status, doneStatus: view.done_status, url: t.url } });
+          }
+        }
+      } catch { /* Notion is optional here: the check still works on earlier meetings */ }
+      if (!items.length && !notionItems.length) {
         throw new Error("No earlier action items found. Generate ACTION ITEMS for an earlier meeting first, then check again.");
       }
 
@@ -83,7 +104,7 @@ export function FollowUpPanel({ meta, chunks, ready }: { meta: SessionMeta; chun
       for (const f of tracked) {
         try { files.push({ name: f.display_name, content: (await api.readTrackerFile(f.id)).content }); } catch { /* unreadable file: skip */ }
       }
-      items = matchCheckboxState(items, files).slice(0, MAX_ITEMS);
+      items = [...matchCheckboxState(items, files), ...notionItems].slice(0, MAX_ITEMS + 20);
 
       const { text } = limitTranscript(timedTranscript(chunks));
       const plain = text.replace(/^\[\d+(?::\d+)+\]\s*/gm, "");
@@ -97,7 +118,7 @@ export function FollowUpPanel({ meta, chunks, ready }: { meta: SessionMeta; chun
       if (open.length) {
         reqs.push({
           purpose: "Check earlier action items", system: buildFollowUpSystemPrompt(), user: buildFollowUpUserPrompt(open, plain, rethink), mode: "review",
-          items: [{ label: `Open action items from ${sessions.length} earlier meeting${sessions.length === 1 ? "" : "s"}`, text: priorItemsText(open) }, transcriptItem],
+          items: [{ label: `Open action items from ${sessions.length} earlier meeting${sessions.length === 1 ? "" : "s"}${open.some((i) => i.notion) ? " and your Notion tasks" : ""}`, text: priorItemsText(open) }, transcriptItem],
         });
       }
       if (summaries.length) {
@@ -158,6 +179,22 @@ export function FollowUpPanel({ meta, chunks, ready }: { meta: SessionMeta; chun
       </div>
       {error && <div className="error" role="alert">{error}</div>}
       {report && <pre className="voice-pre">{followUpMarkdown(report)}</pre>}
+      {report && report.results.filter((r) => r.status === "resolved" && r.id.startsWith("notion:")).map((r) => {
+        const item = report.items.find((i) => i.id === r.id);
+        if (!item?.notion) return null;
+        return (
+          <div key={r.id} className="notion-diff">
+            <p className="note">This Notion task sounds finished: “{item.task}”{r.evidence ? ` — “${r.evidence}”` : ""}</p>
+            {marked[r.id] === "done" ? <span className="note">Marked done in Notion.</span> : (
+              <div className="voice-actions">
+                <button className="btn" disabled={!item.notion.doneStatus || marked[r.id] === "…"} onClick={() => void markDone(item)}
+                  title={item.notion.doneStatus ? "Sets the task's Status to Done in Notion" : "The Tasks database has no Done option"}>MARK DONE IN NOTION</button>
+                {marked[r.id] && marked[r.id] !== "…" && <span className="error">{marked[r.id]}</span>}
+              </div>
+            )}
+          </div>
+        );
+      })}
       {exporting && <ExportDialog meta={meta} docTitle="follow-ups" sections={sections} onClose={() => setExporting(false)} />}
     </div>
   );

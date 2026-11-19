@@ -26,6 +26,8 @@ pub struct NotionTask {
     pub status: Option<String>,
     pub owner: Option<String>,
     pub url: String,
+    /// Ids of the meeting pages this task is linked to (the mapped "Meeting" relation), dashed.
+    pub meeting_ids: Vec<String>,
 }
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -37,6 +39,8 @@ pub struct NotionTasksView {
     pub done_status: Option<String>,
     /// Why ticking is not available, if it is not.
     pub read_only_reason: Option<String>,
+    /// Whether the Meeting column is mapped, so tasks can be tied to meetings.
+    pub links_meetings: bool,
 }
 
 struct Columns<'a> {
@@ -44,6 +48,7 @@ struct Columns<'a> {
     due: Option<&'a Prop>,
     status: Option<&'a Prop>,
     owner: Option<&'a Prop>,
+    meeting: Option<&'a Prop>,
 }
 
 fn columns<'a>(schema: &'a Schema, mapping: &[super::db::MapEntry]) -> Result<Columns<'a>, String> {
@@ -53,6 +58,7 @@ fn columns<'a>(schema: &'a Schema, mapping: &[super::db::MapEntry]) -> Result<Co
         due: find("due").filter(|p| p.kind == "date"),
         status: find("status").filter(|p| matches!(p.kind.as_str(), "status" | "select")),
         owner: find("owner"),
+        meeting: find("meeting").filter(|p| p.kind == "relation"),
     })
 }
 
@@ -85,6 +91,13 @@ fn task_from(page: &Value, c: &Columns) -> Option<NotionTask> {
         status: c.status.and_then(|p| status_of(page, p)),
         owner: owner.filter(|o| !o.trim().is_empty()),
         url: page.get("url").and_then(Value::as_str).unwrap_or("").to_string(),
+        meeting_ids: c
+            .meeting
+            .and_then(|p| get(&p.name))
+            .and_then(|p| p.get("relation"))
+            .and_then(Value::as_array)
+            .map(|a| a.iter().filter_map(|r| r.get("id").and_then(Value::as_str)).filter_map(parse_page_id).collect())
+            .unwrap_or_default(),
     })
 }
 
@@ -136,7 +149,7 @@ pub fn open_tasks(client: &Client, store: &Store) -> Result<NotionTasksView, Str
         (Some(_), None) => Some("The Status column has no \"Done\" option, so tasks cannot be ticked off here.".to_string()),
         _ => None,
     };
-    Ok(NotionTasksView { database: dest.title, rows, truncated, done_status, read_only_reason })
+    Ok(NotionTasksView { database: dest.title, rows, truncated, done_status, read_only_reason, links_meetings: cols.meeting.is_some() })
 }
 
 #[derive(Serialize, Debug, PartialEq)]
