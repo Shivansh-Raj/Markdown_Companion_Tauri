@@ -112,10 +112,14 @@ impl Capture {
     /// Opens the chosen input device (or the default) and starts streaming into `tx`.
     pub fn start(device: Option<&str>, tx: Sender<Msg>) -> Result<Capture, String> {
         let wanted = device.map(str::to_owned);
+        let err_tx = tx.clone();
         let (ready_tx, ready_rx) = mpsc::channel::<Result<String, String>>();
         let (ctl_tx, ctl_rx): (Sender<Ctl>, Receiver<Ctl>) = mpsc::channel();
         let thread = std::thread::spawn(move || {
-            let setup = (|| -> Result<(cpal::Stream, String), String> {
+            // Opens the microphone and starts it. Called at the start and again on every resume, because a paused
+            // recording must not hold the microphone: dropping the stream is what releases it (and clears the
+            // system's "microphone in use" indicator).
+            let open = move || -> Result<(cpal::Stream, String), String> {
                 let host = cpal::default_host();
                 let dev = match &wanted {
                     Some(name) => host
@@ -136,17 +140,24 @@ impl Capture {
                 };
                 stream.play().map_err(|e| e.to_string())?;
                 Ok((stream, name))
-            })();
-            match setup {
-                Ok((stream, name)) => {
+            };
+            match open() {
+                Ok((first, name)) => {
                     let _ = ready_tx.send(Ok(name));
+                    let mut stream = Some(first);
                     while let Ok(c) = ctl_rx.recv() {
                         match c {
-                            Ctl::Pause => {
-                                let _ = stream.pause();
-                            }
+                            // Release the microphone while paused.
+                            Ctl::Pause => stream = None,
+                            // Always open a fresh stream: this also recovers from an unplugged or changed device.
                             Ctl::Resume => {
-                                let _ = stream.play();
+                                stream = None;
+                                match open() {
+                                    Ok((s, _)) => stream = Some(s),
+                                    Err(e) => {
+                                        let _ = err_tx.send(Msg::Error(e));
+                                    }
+                                }
                             }
                             Ctl::Stop => break,
                         }

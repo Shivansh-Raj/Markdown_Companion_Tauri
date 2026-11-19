@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { api } from "../../services/api";
-import { appendFromSections, appendToContent, combinedFromSections, standaloneFromSection, type ExtraProperties, type Section } from "../../services/voice/templates";
+import "../Notion/notion.css";
+import { appendFromSections, appendToContent, bodyFromSections, combinedFromSections, standaloneFromSection, type ExtraProperties, type Section } from "../../services/voice/templates";
+import { notionTargetFor, notionValues } from "../../services/voice/notionExport";
 import { suggestFileName } from "../../services/voice/transcript";
 import type { SessionMeta } from "../../services/voice/types";
-import type { FileEntry } from "../../types";
+import type { FileEntry, NotionDestination, NotionHome, NotionRowPreview } from "../../types";
 
 const FRONTMATTER_KEY = "voice-frontmatter";
 const FOLDER_KEY = "voice-export-folder";
@@ -12,7 +14,7 @@ const readPref = (k: string): string | null => { try { return localStorage.getIt
 const writePref = (k: string, v: string | null) => { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* optional */ } };
 
 type Layout = "combined" | "separate";
-type Dest = "new" | "append";
+type Dest = "new" | "append" | "notion";
 
 /** Preview and save voice outputs as Markdown: new file(s), or appended to an existing file without touching it. */
 export function ExportDialog({ meta, sections, docTitle, properties, onClose }: { meta: SessionMeta; sections: Section[]; docTitle: string; properties?: ExtraProperties; onClose: () => void }) {
@@ -29,6 +31,20 @@ export function ExportDialog({ meta, sections, docTitle, properties, onClose }: 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<string | null>(null);
+  // Notion: a database row when one is set up for this kind of recording, else a page under the home page.
+  const nTarget = useMemo(() => notionTargetFor(meta), [meta]);
+  const [nConnected, setNConnected] = useState(false);
+  const [nHome, setNHome] = useState<NotionHome | null>(null);
+  const [nDb, setNDb] = useState<NotionDestination | null>(null);
+  const [nTitle, setNTitle] = useState(meta.title.trim() || docTitle);
+  const [nPreview, setNPreview] = useState<NotionRowPreview | null>(null);
+  const [nUrl, setNUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.notionConnected().then(setNConnected).catch(() => {});
+    api.notionHome().then(setNHome).catch(() => {});
+    if (nTarget.key !== "notes") api.notionDestination(nTarget.key).then(setNDb).catch(() => {});
+  }, [nTarget.key]);
 
   useEffect(() => {
     api.getSaveDir().then(setDefaultDir).catch(() => {});
@@ -44,6 +60,19 @@ export function ExportDialog({ meta, sections, docTitle, properties, onClose }: 
     return chosen.map((s) => `<!-- ${suggestFileName(meta, s.suffix)}.md -->\n${standaloneFromSection(meta, s, frontmatter, properties)}`).join("\n\n");
   }, [chosen, dest, layout, meta, docTitle, frontmatter, properties]);
 
+  const nBody = useMemo(() => bodyFromSections(chosen), [chosen]);
+  const nValues = useMemo(() => notionValues(meta, properties), [meta, properties]);
+  const nReady = nConnected && (nDb !== null || nHome !== null);
+
+  // Shows exactly which columns would be filled; reads the database's properties, creates nothing.
+  useEffect(() => {
+    setNPreview(null);
+    if (dest !== "notion" || !nDb || nTarget.key === "notes") return;
+    let cancelled = false;
+    api.notionPreviewRow(nTarget.key, nTitle || "Untitled", nValues).then((p) => { if (!cancelled) setNPreview(p); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [dest, nDb, nTitle, nValues, nTarget.key]);
+
   const chooseFolder = (dir: string | null) => { setFolder(dir); writePref(FOLDER_KEY, dir); };
   const toggleFrontmatter = (on: boolean) => { setFrontmatter(on); writePref(FRONTMATTER_KEY, on ? "1" : "0"); };
 
@@ -58,7 +87,15 @@ export function ExportDialog({ meta, sections, docTitle, properties, onClose }: 
     setDone(null);
     try {
       const write = (n: string, c: string) => (folder ? api.createMarkdownFileIn(folder, n, c) : api.createMarkdownFile(n, c));
-      if (dest === "append") {
+      if (dest === "notion") {
+        const made = nDb && nTarget.key !== "notes"
+          ? await api.notionCreateRow(nTarget.key, nTitle, nBody, nValues)
+          : await api.notionCreatePage("", nTitle, nBody, undefined, nTarget.section);
+        setNUrl(made.url || null);
+        const warnings: string[] = "warnings" in made ? (made.warnings as string[]) : [];
+        const warn = warnings.length ? ` Left empty: ${warnings.join(" ")}` : "";
+        setDone(`Saved to Notion${nDb && nTarget.key !== "notes" ? ` (${nDb.title})` : ` (${nHome?.title} › ${nTarget.label})`}.${warn}`);
+      } else if (dest === "append") {
         const entry = files.find((f) => f.id === target);
         if (!entry) throw new Error("Choose a file to append to.");
         const snap = await api.readTrackerFile(entry.id);
@@ -104,6 +141,7 @@ export function ExportDialog({ meta, sections, docTitle, properties, onClose }: 
       <div className="voice-actions">
         <label className="voice-check"><input type="radio" name="dest" checked={dest === "new"} onChange={() => setDest("new")} /> New file</label>
         <label className="voice-check"><input type="radio" name="dest" checked={dest === "append"} onChange={() => setDest("append")} /> Add to an existing file</label>
+        {nConnected && <label className="voice-check"><input type="radio" name="dest" checked={dest === "notion"} onChange={() => setDest("notion")} /> Notion</label>}
         {dest === "new" && (
           <>
             <label className="voice-check"><input type="radio" name="layout" checked={layout === "combined"} onChange={() => setLayout("combined")} /> One document</label>
@@ -111,7 +149,16 @@ export function ExportDialog({ meta, sections, docTitle, properties, onClose }: 
           </>
         )}
       </div>
-      {dest === "new" ? (
+      {dest === "notion" ? (
+        <div className="voice-actions">
+          <input className="search" style={{ flex: 1, minWidth: 160, margin: 0 }} aria-label="Notion page title" value={nTitle} onChange={(e) => setNTitle(e.target.value)} />
+          <span className="note">
+            {nDb && nTarget.key !== "notes" ? `A new row in “${nDb.title}”, with its mapped columns filled.`
+              : nHome ? `A new page in ${nHome.title} › ${nTarget.label}.`
+              : "Choose a Notion home page or database in Settings first."}
+          </span>
+        </div>
+      ) : dest === "new" ? (
         <div className="voice-actions">
           {layout === "combined" && <input className="search" style={{ flex: 1, minWidth: 160, margin: 0 }} aria-label="File name" value={name} onChange={(e) => setName(e.target.value)} />}
           <span className="note" title={folder ?? defaultDir}>Folder: {(folder ?? defaultDir) || "default"}</span>
@@ -133,12 +180,20 @@ export function ExportDialog({ meta, sections, docTitle, properties, onClose }: 
           <span className="note">Added at the end; nothing already in the file is changed.</span>
         </div>
       )}
-      <textarea className="voice-preview" readOnly aria-label="Preview" value={preview} />
+      <textarea className="voice-preview" readOnly aria-label="Preview" value={dest === "notion" ? nBody : preview} />
+      {dest === "notion" && nPreview && (
+        <div className="notion-diff">
+          <p className="note">Columns that will be filled in “{nPreview.database}”:</p>
+          <pre className="notion-diff-new">{JSON.stringify(nPreview.properties, null, 2)}</pre>
+          {nPreview.warnings.map((w) => <p key={w} className="error">{w}</p>)}
+        </div>
+      )}
       {error && <div className="error" role="alert">{error}</div>}
       {done && <div className="voice-warn" role="status">{done}</div>}
+      {dest === "notion" && nUrl && <button className="btn" onClick={() => void api.openExternal(nUrl).catch((e) => setError(String(e)))}>OPEN IN NOTION</button>}
       <div className="voice-actions">
-        <button className="btn primary" disabled={busy || !chosen.length || (dest === "append" && !target)} onClick={() => void save()}>
-          {dest === "new" ? "SAVE & OPEN" : "ADD TO FILE"}
+        <button className="btn primary" disabled={busy || !chosen.length || (dest === "append" && !target) || (dest === "notion" && (!nReady || !nTitle.trim()))} onClick={() => void save()}>
+          {dest === "new" ? "SAVE & OPEN" : dest === "notion" ? "SAVE TO NOTION" : "ADD TO FILE"}
         </button>
         <button className="btn" onClick={onClose}>CLOSE</button>
       </div>

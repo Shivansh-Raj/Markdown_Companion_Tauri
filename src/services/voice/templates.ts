@@ -74,6 +74,11 @@ export function combinedFromSections(meta: SessionMeta, docTitle: string, sectio
   return `${header(meta, docTitle, frontmatter, extra)}${sections.map((s) => `## ${s.label}\n\n${bodyOf(s)}\n${noteOf(s)}`).join("\n")}`;
 }
 
+/** Sections as the body of a Notion page: the title, date and length go in the page's title and properties instead. */
+export function bodyFromSections(sections: Section[]): string {
+  return sections.map((s) => `## ${s.label}\n\n${bodyOf(s)}\n${noteOf(s)}`).join("\n").trim() + "\n";
+}
+
 /**
  * Text appended to an existing file. Existing content is never touched, so completed checkboxes and everything
  * else stay exactly as they are; the new block just goes at the end under its own heading.
