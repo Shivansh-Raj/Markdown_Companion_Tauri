@@ -172,6 +172,16 @@ export function parseAskAnswer(raw: string, doc: string): ParsedAnswer {
   return { answer, sources };
 }
 
+/**
+ * An approved Ask answer as a Notion page body: the question, the answer, and only the quotes that were verified against the
+ * source, each with its section. `source` names where the answers came from (a file name or a Notion page, with its link).
+ */
+export function archiveMarkdown(question: string, answer: string, sources: Source[], source: { name: string; url?: string }): string {
+  const where = source.url ? `[${source.name}](${source.url})` : source.name;
+  const quotes = sources.filter((s) => s.verified).map((s) => `> ${s.quote.replace(/\n+/g, " ")}\n\n— ${s.heading ? `${s.heading}, ` : ""}${s.passage ? s.passage.name : where}`);
+  return [`**Question:** ${question.trim()}`, `**Source:** ${where}`, "## Answer", answer.trim(), ...(quotes.length ? ["## Verified quotes", ...quotes] : [])].join("\n\n") + "\n";
+}
+
 export function isNotFound(answer: string): boolean {
   const a = answer.trim().toLowerCase();
   return a.startsWith("i couldn't find that in this file") || a.startsWith("i couldn't find that in these notes") || a.startsWith("i couldn't find anything about that");

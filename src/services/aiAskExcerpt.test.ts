@@ -55,3 +55,23 @@ describe("quotes name their section", () => {
     expect(p.sources[1].heading).toBeUndefined();
   });
 });
+
+import { archiveMarkdown } from "./aiAsk";
+
+describe("archiving an answer", () => {
+  it("keeps the question, the answer and only verified quotes with their section and source link", () => {
+    const md = archiveMarkdown(" Who owns it? ", "Priya.", [
+      { quote: "Priya owns the migration.", verified: true, heading: "Owners" },
+      { quote: "made up", verified: false },
+    ], { name: "Roadmap", url: "https://notion.so/r" });
+    expect(md).toContain("**Question:** Who owns it?");
+    expect(md).toContain("**Source:** [Roadmap](https://notion.so/r)");
+    expect(md).toContain("## Answer\n\nPriya.");
+    expect(md).toContain("> Priya owns the migration.\n\n— Owners, [Roadmap](https://notion.so/r)");
+    expect(md).not.toContain("made up");
+  });
+
+  it("leaves out the quotes heading when nothing was verified", () => {
+    expect(archiveMarkdown("q", "a", [{ quote: "x", verified: false }], { name: "notes.md" })).not.toContain("Verified quotes");
+  });
+});

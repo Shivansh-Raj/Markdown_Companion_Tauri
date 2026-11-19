@@ -15,7 +15,7 @@ export function NotionOpen({ onBack, onOpened }: { onBack: () => void; onOpened:
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // Ask a question about a Notion page without opening it as a note. The page is read live and nothing is saved locally.
-  const [asking, setAsking] = useState<{ title: string; markdown: string; notice?: string } | null>(null);
+  const [asking, setAsking] = useState<{ title: string; markdown: string; notice?: string; url?: string } | null>(null);
 
   useEffect(() => { api.notionConnected().then(setConnected).catch((e) => { setConnected(false); setError(String(e)); }); }, []);
 
@@ -28,7 +28,7 @@ export function NotionOpen({ onBack, onOpened }: { onBack: () => void; onOpened:
     } catch (e) { setError(String(e)); } finally { setBusy(false); }
   };
 
-  const ask = async (page: string, title: string) => {
+  const ask = async (page: string, title: string, url?: string) => {
     setBusy(true); setError(null); setNotice(null);
     try {
       const p = await api.notionReadPage(page);
@@ -37,6 +37,7 @@ export function NotionOpen({ onBack, onOpened }: { onBack: () => void; onOpened:
       if (!markdown) { setError("That page has no text to ask about."); return; }
       setAsking({
         title,
+        url: url || (page.startsWith("http") ? page : undefined),
         markdown,
         notice: p.truncated ? "This page is very large or partly shared with the connection, so only the part Notion returned is used." : undefined,
       });
@@ -52,7 +53,7 @@ export function NotionOpen({ onBack, onOpened }: { onBack: () => void; onOpened:
 
   return (
     asking ? (
-      <AskPanel content={asking.markdown} fileName={asking.title} notionPage notice={asking.notice} onClose={() => setAsking(null)} />
+      <AskPanel content={asking.markdown} fileName={asking.title} notionPage notice={asking.notice} sourceUrl={asking.url} onClose={() => setAsking(null)} />
     ) : (
     <div className="notion-open" onKeyDown={(e) => e.key === "Escape" && onBack()}>
       <h2>OPEN FROM NOTION</h2>
@@ -71,7 +72,7 @@ export function NotionOpen({ onBack, onOpened }: { onBack: () => void; onOpened:
               {hits.map((h) => (
                 <li key={h.id} className="notion-hit-row">
                   <button className="btn" disabled={busy} onClick={() => void pull(h.id)} title="Open as a note">{h.title}</button>
-                  <button className="btn" disabled={busy} onClick={() => void ask(h.id, h.title)} title="Ask a question about this page">ASK</button>
+                  <button className="btn" disabled={busy} onClick={() => void ask(h.id, h.title, h.url)} title="Ask a question about this page">ASK</button>
                 </li>
               ))}
             </ul>

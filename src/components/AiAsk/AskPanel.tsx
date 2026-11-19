@@ -5,7 +5,7 @@ import { streamChat } from "../../services/ai";
 import { useReceipt } from "../Receipt/ReceiptProvider";
 import {
   askHistoryText, buildAskSystemPrompt, buildAskUserPrompt, buildScopedSystemPrompt, buildScopedUserPrompt, isNotFound, excerptForAsk,
-  parseAskAnswer, parseScopedAnswer, retrievalQuery, type ParsedAnswer, type Turn,
+  archiveMarkdown, parseAskAnswer, parseScopedAnswer, retrievalQuery, type ParsedAnswer, type Turn,
 } from "../../services/aiAsk";
 import type { AskScopes } from "../../types";
 import type { Passage } from "../../services/aiAsk";
@@ -26,7 +26,7 @@ type Scope = "note" | "folder" | "vault";
 const EXAMPLES = ["What is still left to do?", "Summarise this file in three bullets.", "What is due soonest?"];
 
 /** Ask a question about the open file; the answer comes only from the file, with quotes you can check. */
-export function AskPanel({ noteId, content, fileName, onClose, notionPage = false, notice }: { noteId?: string; content: string; fileName: string; onClose: () => void; notionPage?: boolean; notice?: string }) {
+export function AskPanel({ noteId, content, fileName, onClose, notionPage = false, notice, sourceUrl }: { noteId?: string; content: string; fileName: string; onClose: () => void; notionPage?: boolean; notice?: string; sourceUrl?: string }) {
   const [scopes, setScopes] = useState<AskScopes | null>(null);
   const [scope, setScope] = useState<Scope>("note");
   const [excluded, setExcluded] = useState(0);
@@ -35,6 +35,23 @@ export function AskPanel({ noteId, content, fileName, onClose, notionPage = fals
   const [live, setLive] = useState<string | null>(null); // answer being streamed
   const [asked, setAsked] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Approved answers can be saved to the "AI answers" page in Notion. Only on a button press; never automatically.
+  const [canArchive, setCanArchive] = useState(false);
+  const [archived, setArchived] = useState<Record<number, string>>({}); // item index -> page url, or "…" while saving
+  useEffect(() => {
+    Promise.all([api.notionConnected(), api.notionHome()]).then(([c, h]) => setCanArchive(c && !!h)).catch(() => {});
+  }, []);
+  const archive = async (i: number, it: Item) => {
+    setArchived((a) => ({ ...a, [i]: "…" }));
+    try {
+      const md = archiveMarkdown(it.question, it.answer, it.sources, { name: fileName, url: sourceUrl });
+      const made = await api.notionCreatePage("", it.question.trim().slice(0, 200), md, undefined, "answers");
+      setArchived((a) => ({ ...a, [i]: made.url || "saved" }));
+    } catch (e) {
+      setArchived((a) => { const n = { ...a }; delete n[i]; return n; });
+      setError(String(e));
+    }
+  };
   const abort = useRef<AbortController | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -202,6 +219,15 @@ export function AskPanel({ noteId, content, fileName, onClose, notionPage = fals
                   ))}
                 </ul>
               ) : <p className="note">No exact quote could be matched in the file, so double-check this answer.</p>
+            )}
+            {canArchive && !it.error && !isNotFound(it.answer) && (
+              <div className="voice-actions">
+                {archived[i] === undefined ? (
+                  <button className="btn" onClick={() => void archive(i, it)} title="Save this question, answer and its checked quotes to the AI answers page in Notion">SAVE TO NOTION</button>
+                ) : archived[i] === "…" ? <span className="note">Saving…</span> : (
+                  <span className="note">Saved to Notion › AI answers.{archived[i].startsWith("http") && <> <button className="ask-note" onClick={() => void api.openExternal(archived[i]).catch(() => {})}>Open</button></>}</span>
+                )}
+              </div>
             )}
           </div>
         ))}
