@@ -11,13 +11,17 @@ import {
 } from "../../services/ai";
 import { MarkdownRenderer } from "../MarkdownRenderer/MarkdownRenderer";
 import { useReceipt } from "../Receipt/ReceiptProvider";
+import { GrammarFixer } from "./GrammarFixer";
+import { PromptBuilder } from "./PromptBuilder";
 import { TypingCat } from "./TypingCat";
 
 type Phase = "input" | "generating" | "done";
+type Mode = "file" | "prompt" | "grammar";
 const isMac = typeof navigator !== "undefined" && /mac/i.test(navigator.platform);
 
 export function AiCreate({ onBack, onCreated }: { onBack: () => void; onCreated: (id: string) => void }) {
   const approve = useReceipt();
+  const [mode, setMode] = useState<Mode>("file");
   const [phase, setPhase] = useState<Phase>("input");
   const [prompt, setPrompt] = useState("");
   const [typeChoice, setTypeChoice] = useState<DocTypeChoice>("auto");
@@ -117,6 +121,14 @@ export function AiCreate({ onBack, onCreated }: { onBack: () => void; onCreated:
 
   const needsKey = apiKey === null || editingKey;
 
+  // Prompt Builder: a separate, disposable flow that shares this screen's key handling and AI path.
+  if (mode === "grammar" && apiKey) {
+    return <GrammarFixer apiKey={apiKey} onBack={() => setMode("file")} />;
+  }
+  if (mode === "prompt" && apiKey) {
+    return <PromptBuilder apiKey={apiKey} onBack={() => setMode("file")} />;
+  }
+
   return (
     <div
       className="ai"
@@ -160,6 +172,11 @@ export function AiCreate({ onBack, onCreated }: { onBack: () => void; onCreated:
             </>
           ) : (
             <>
+              <div className="ai-modes" role="group" aria-label="What to create">
+                <button className="btn primary" aria-pressed="true">FILE</button>
+                <button className="btn" aria-pressed="false" disabled={!apiKey} onClick={() => setMode("prompt")} title="Turn an idea into a prompt for an AI agent. Not saved as a note.">AGENT PROMPT</button>
+                <button className="btn" aria-pressed="false" disabled={!apiKey} onClick={() => setMode("grammar")} title="Fix spelling and grammar in pasted text. Not saved as a note.">FIX GRAMMAR</button>
+              </div>
               <h2>WHAT SHOULD I WRITE?</h2>
               <textarea
                 className="ai-prompt"
